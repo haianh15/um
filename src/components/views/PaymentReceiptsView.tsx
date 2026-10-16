@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { PaymentNotice, PaymentReceipt } from '../../types';
+import { PaymentNotice, PaymentReceipt, ReceiptAuditEntry } from '../../types';
 import {
   CreditCard, CheckCircle2, AlertCircle, Clock, RotateCcw,
   Landmark, ArrowRight, ShieldCheck, History, X, Search, Filter,
-  FileText, AlertTriangle, ArrowUpRight, Check, Eye
+  FileText, AlertTriangle, ArrowUpRight, Check, Eye, ShieldAlert,
+  Calendar, User, Lock, Sparkles
 } from 'lucide-react';
 
 export const PaymentReceiptsView: React.FC = () => {
@@ -17,14 +18,18 @@ export const PaymentReceiptsView: React.FC = () => {
     currentUser
   } = useApp();
 
-  // Tab: UC08.1 vs UC08.2
-  const [activeTab, setActiveTab] = useState<'uc08_1' | 'uc08_2'>('uc08_1');
+  // Tab: UC08.1 vs UC08.2 vs UC08.3 (Audit History)
+  const [activeTab, setActiveTab] = useState<'uc08_1' | 'uc08_2' | 'uc08_3'>('uc08_1');
 
   // Filters for UC08.1
   const [roomFilter, setRoomFilter] = useState<string>('ALL');
   const [periodFilter, setPeriodFilter] = useState<string>('ALL');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<'ALL' | 'UNPAID' | 'PAID' | 'OVERDUE'>('ALL');
   const [noticeStatusFilter, setNoticeStatusFilter] = useState<'ALL' | 'ACTIVE' | 'REPLACED'>('ALL');
+
+  // Filters for UC08.3 (Audit History)
+  const [auditFilter, setAuditFilter] = useState<'ALL' | 'REVERTED' | 'ACTIVE'>('ALL');
+  const [auditSearchTerm, setAuditSearchTerm] = useState('');
 
   // Modal Confirm Receipt (UC08.2)
   const [selectedNotice, setSelectedNotice] = useState<PaymentNotice | null>(null);
@@ -35,7 +40,7 @@ export const PaymentReceiptsView: React.FC = () => {
   const [proofFile, setProofFile] = useState<string>('');
   const [confirmError, setConfirmError] = useState<string | null>(null);
 
-  // Modal Revert Receipt (AF-03 / BR-UC08.2-06, BR-UC08.2-10)
+  // Modal Revert Receipt (Requirement 4: Sửa xác nhận thu nhầm có lý do bắt buộc và lịch sử; không xóa giao dịch nguồn)
   const [showRevertModal, setShowRevertModal] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState<PaymentReceipt | null>(null);
   const [revertReason, setRevertReason] = useState<string>('');
@@ -43,10 +48,15 @@ export const PaymentReceiptsView: React.FC = () => {
 
   // Detail Modal for Inspection
   const [inspectNotice, setInspectNotice] = useState<PaymentNotice | null>(null);
+  const [inspectReceiptAudit, setInspectReceiptAudit] = useState<PaymentReceipt | null>(null);
 
-  // Filter options
-  const uniqueRooms = Array.from(new Set(paymentNotices.map(n => n.roomCode)));
-  const uniquePeriods = Array.from(new Set(paymentNotices.map(n => n.periodCode)));
+  // Quick suggestion reasons for revert
+  const QUICK_REVERT_REASONS = [
+    'Khách nộp nhầm tiền cọc sang tiền thuê phòng',
+    'Chuyển khoản nhầm số phòng (ví dụ chuyển nhầm giữa P.101 và P.201)',
+    'Giao dịch ngân hàng bị tra soát hoàn lại tiền',
+    'Nhập nhầm mã giao dịch hoặc thao tác nhầm nút xác nhận'
+  ];
 
   // Filtered Notices for UC08.1
   const filteredNotices = paymentNotices.filter(n => {
@@ -60,6 +70,20 @@ export const PaymentReceiptsView: React.FC = () => {
     if (paymentStatusFilter === 'PAID' && n.paymentStatus !== 'Đã thu') return false;
     if (paymentStatusFilter === 'OVERDUE' && (!isOverdue || n.paymentStatus !== 'Chưa thu')) return false;
 
+    return true;
+  });
+
+  // Filtered Receipts for UC08.3 Audit History
+  const filteredAuditReceipts = paymentReceipts.filter(r => {
+    if (auditFilter === 'REVERTED' && r.status !== 'Không còn hiệu lực') return false;
+    if (auditFilter === 'ACTIVE' && r.status !== 'Đang hiệu lực') return false;
+    if (auditSearchTerm) {
+      const term = auditSearchTerm.toLowerCase();
+      const matchRoom = r.roomCode.toLowerCase().includes(term);
+      const matchTxn = r.transactionCode.toLowerCase().includes(term);
+      const matchReason = (r.invalidatedReason || '').toLowerCase().includes(term);
+      if (!matchRoom && !matchTxn && !matchReason) return false;
+    }
     return true;
   });
 
@@ -77,6 +101,8 @@ export const PaymentReceiptsView: React.FC = () => {
   const overdueCount = paymentNotices.filter(
     n => n.status === 'Đang hiệu lực' && n.paymentStatus === 'Chưa thu' && new Date(n.dueDate) < new Date()
   ).length;
+
+  const revertedReceiptsCount = paymentReceipts.filter(r => r.status === 'Không còn hiệu lực').length;
 
   // Open Confirm Modal
   const openConfirmModal = (notice: PaymentNotice) => {
@@ -137,14 +163,15 @@ export const PaymentReceiptsView: React.FC = () => {
     }
   };
 
-  // Submit Revert Receipt (AF-03 / BR-UC08.2-06, BR-UC08.2-10)
+  // Submit Revert Receipt (Requirement 4: Sửa xác nhận thu nhầm có lý do bắt buộc và lịch sử; không xóa giao dịch nguồn)
   const handleRevertSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedReceipt) return;
     setRevertError(null);
 
+    // Bắt buộc nhập lý do (EF-04 / BR-UC08.2-06)
     if (!revertReason.trim()) {
-      setRevertError('EF-04 / BR-UC08.2-06: Lý do sửa xác nhận thu nhầm là trường bắt buộc.');
+      setRevertError('EF-04 / BR-UC08.2-06: Lý do sửa xác nhận thu nhầm là trường BẮT BUỘC. Vui lòng ghi rõ nguyên nhân sửa.');
       return;
     }
 
@@ -153,6 +180,7 @@ export const PaymentReceiptsView: React.FC = () => {
       setShowRevertModal(false);
       setRevertReason('');
       alert(res.message);
+      setActiveTab('uc08_3'); // Switch to audit history tab to view results
     } else {
       setRevertError(res.message);
     }
@@ -170,255 +198,173 @@ export const PaymentReceiptsView: React.FC = () => {
             <h1 className="text-lg font-bold text-slate-900">Thu tiền & Đối soát Ngân hàng</h1>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Theo dõi tình trạng thanh toán (UC08.1) và Xác nhận giao dịch thực nhận vào tài khoản ngân hàng (UC08.2)
+            Theo dõi thanh toán (UC08.1), Xác nhận giao dịch thực nhận (UC08.2), và Sửa thu nhầm bảo toàn giao dịch nguồn (AF-03).
           </p>
         </div>
 
-        {/* 2 Tabs Segmented Control */}
+        {/* 3 Tabs Segmented Control */}
         <div className="flex items-center bg-slate-100 p-1 rounded-xl text-xs font-semibold shrink-0">
           <button
             onClick={() => setActiveTab('uc08_1')}
-            className={`px-3.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'uc08_1' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <CreditCard className="w-4 h-4" />
-            8.1. Theo dõi thanh toán (UC08.1)
+            8.1. Theo dõi (UC08.1)
           </button>
           <button
             onClick={() => setActiveTab('uc08_2')}
-            className={`px-3.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'uc08_2' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <ShieldCheck className="w-4 h-4" />
-            8.2. Chứng từ & Sửa nhầm (UC08.2)
+            8.2. Chứng từ (UC08.2)
+          </button>
+          <button
+            onClick={() => setActiveTab('uc08_3')}
+            className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'uc08_3' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <History className="w-4 h-4 text-purple-600" />
+            8.3. Lịch sử sửa nhầm ({revertedReceiptsCount})
           </button>
         </div>
       </div>
 
       {/* KPI Stats Overview */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs">
-          <span className="text-[11px] font-semibold text-slate-400 block">TỔNG PHẢI THU (ĐANG HIỆU LỰC)</span>
-          <span className="text-lg font-bold font-mono text-slate-900 block mt-1">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-xs">
+          <span className="text-[11px] text-slate-500 block">Tổng phải thu (Hiệu lực):</span>
+          <span className="text-base font-bold font-mono text-slate-900">
             {totalReceivable.toLocaleString('vi-VN')} đ
           </span>
-          <span className="text-[10px] text-slate-500 mt-0.5 block">{paymentNotices.filter(n => n.status === 'Đang hiệu lực').length} thông báo</span>
         </div>
-
-        <div className="p-4 bg-white border border-emerald-200 bg-emerald-50/20 rounded-2xl shadow-xs">
-          <span className="text-[11px] font-semibold text-emerald-700 block">ĐÃ THU ĐỦ VÀO NGÂN HÀNG</span>
-          <span className="text-lg font-bold font-mono text-emerald-700 block mt-1">
+        <div className="p-3.5 bg-emerald-50/60 rounded-xl border border-emerald-200 shadow-xs">
+          <span className="text-[11px] text-emerald-800 block">Đã thực thu vào tài khoản:</span>
+          <span className="text-base font-bold font-mono text-emerald-700">
             {totalCollected.toLocaleString('vi-VN')} đ
           </span>
-          <span className="text-[10px] text-emerald-600 mt-0.5 block">Đã xác nhận tại UC08.2</span>
         </div>
-
-        <div className="p-4 bg-white border border-amber-200 bg-amber-50/20 rounded-2xl shadow-xs">
-          <span className="text-[11px] font-semibold text-amber-700 block">CÒN PHẢI THU (CHƯA THU)</span>
-          <span className="text-lg font-bold font-mono text-amber-700 block mt-1">
+        <div className="p-3.5 bg-blue-50/60 rounded-xl border border-blue-200 shadow-xs">
+          <span className="text-[11px] text-blue-800 block">Còn phải thu:</span>
+          <span className="text-base font-bold font-mono text-blue-700">
             {totalUncollected.toLocaleString('vi-VN')} đ
           </span>
-          <span className="text-[10px] text-amber-600 mt-0.5 block">Đang chờ khách chuyển khoản</span>
         </div>
-
-        <div className="p-4 bg-white border border-red-200 bg-red-50/20 rounded-2xl shadow-xs">
-          <span className="text-[11px] font-semibold text-red-700 block">THÔNG BÁO QUÁ HẠN</span>
-          <span className="text-lg font-bold font-mono text-red-700 block mt-1">
-            {overdueCount} thông báo
+        <div className="p-3.5 bg-purple-50/60 rounded-xl border border-purple-200 shadow-xs">
+          <span className="text-[11px] text-purple-800 block">Giao dịch đã sửa thu nhầm:</span>
+          <span className="text-base font-bold font-mono text-purple-700">
+            {revertedReceiptsCount} giao dịch (Bảo toàn)
           </span>
-          <span className="text-[10px] text-red-600 mt-0.5 block">Cần nhắc nợ tại QT09</span>
         </div>
       </div>
 
       {/* ========================================================================= */}
-      {/* TAB 1: 8.1. THEO DÕI THANH TOÁN (UC08.1)                                  */}
+      {/* TAB 1: 8.1. THEO DÕI THANH TOÁN (UC08.1)                                   */}
       {/* ========================================================================= */}
       {activeTab === 'uc08_1' && (
         <div className="space-y-4">
           {/* Filters Bar */}
-          <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm space-y-3">
-            <div className="flex flex-wrap items-center gap-3 text-xs">
-              {/* Room Filter */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-500 font-medium">Phòng:</span>
-                <select
-                  value={roomFilter}
-                  onChange={(e) => setRoomFilter(e.target.value)}
-                  className="px-2.5 py-1.5 border border-slate-300 rounded-lg font-semibold text-slate-800"
+          <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-slate-500 flex items-center gap-1 font-medium">
+                <Filter className="w-3.5 h-3.5" /> Lọc trạng thái:
+              </span>
+              {(['ALL', 'UNPAID', 'PAID', 'OVERDUE'] as const).map(st => (
+                <button
+                  key={st}
+                  onClick={() => setPaymentStatusFilter(st)}
+                  className={`px-2.5 py-1 rounded-lg font-medium cursor-pointer transition-colors ${
+                    paymentStatusFilter === st
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
                 >
-                  <option value="ALL">Tất cả phòng</option>
-                  {uniqueRooms.map(r => (
-                    <option key={r} value={r}>Phòng {r}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Period Filter */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-500 font-medium">Kỳ thu:</span>
-                <select
-                  value={periodFilter}
-                  onChange={(e) => setPeriodFilter(e.target.value)}
-                  className="px-2.5 py-1.5 border border-slate-300 rounded-lg font-semibold text-slate-800"
-                >
-                  <option value="ALL">Tất cả kỳ</option>
-                  {uniquePeriods.map(p => (
-                    <option key={p} value={p}>{p}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Notice Status Filter */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-500 font-medium">Hiệu lực:</span>
-                <select
-                  value={noticeStatusFilter}
-                  onChange={(e) => setNoticeStatusFilter(e.target.value as any)}
-                  className="px-2.5 py-1.5 border border-slate-300 rounded-lg font-semibold text-slate-800"
-                >
-                  <option value="ALL">Tất cả</option>
-                  <option value="ACTIVE">Đang hiệu lực</option>
-                  <option value="REPLACED">Đã thay thế</option>
-                </select>
-              </div>
-
-              {/* Payment Status Filter Buttons */}
-              <div className="flex items-center gap-1 ml-auto">
-                <span className="text-slate-500 font-medium mr-1">Trạng thái tiền:</span>
-                {(['ALL', 'UNPAID', 'OVERDUE', 'PAID'] as const).map(st => (
-                  <button
-                    key={st}
-                    onClick={() => setPaymentStatusFilter(st)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all ${
-                      paymentStatusFilter === st
-                        ? 'bg-slate-900 text-white'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {st === 'ALL' && 'Tất cả'}
-                    {st === 'UNPAID' && 'Chưa thu'}
-                    {st === 'OVERDUE' && 'Quá hạn'}
-                    {st === 'PAID' && 'Đã thu'}
-                  </button>
-                ))}
-              </div>
+                  {st === 'ALL' && 'Tất cả'}
+                  {st === 'UNPAID' && 'Chưa thu'}
+                  {st === 'PAID' && 'Đã thu'}
+                  {st === 'OVERDUE' && `Quá hạn (${overdueCount})`}
+                </button>
+              ))}
             </div>
 
-            <p className="text-[11px] text-slate-400">
-              BR-UC08.1-01: Hệ thống chỉ có 2 trạng thái thanh toán chính thức là <strong>Chưa thu</strong> và <strong>Đã thu</strong>. Nhãn <strong>Quá hạn</strong> là cảnh báo phụ khi Chưa thu và ngày hiện tại sau hạn thanh toán.
-            </p>
+            <span className="text-slate-400 text-[11px]">
+              Hiển thị <strong>{filteredNotices.length}</strong> thông báo
+            </span>
           </div>
 
-          {/* List of Notices Table / Cards */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="divide-y divide-slate-100 text-xs">
-              {filteredNotices.length === 0 ? (
-                <div className="py-16 text-center text-slate-400">
-                  Không tìm thấy thông báo thanh toán nào phù hợp với bộ lọc.
-                </div>
-              ) : (
-                filteredNotices.map((n) => {
-                  const isOverdue = n.paymentStatus === 'Chưa thu' && new Date(n.dueDate) < new Date();
-                  const relatedReceipt = paymentReceipts.find(r => r.noticeId === n.id && r.status === 'Đang hiệu lực');
+          {/* Notices List */}
+          <div className="space-y-3">
+            {filteredNotices.length === 0 ? (
+              <div className="p-12 text-center text-slate-400 text-xs bg-white rounded-2xl border border-slate-200">
+                Không tìm thấy thông báo thanh toán nào phù hợp với bộ lọc.
+              </div>
+            ) : (
+              filteredNotices.map((n) => {
+                const isOverdue = n.paymentStatus === 'Chưa thu' && new Date(n.dueDate) < new Date();
+                const relatedReceipt = paymentReceipts.find(r => r.noticeId === n.id && r.status === 'Đang hiệu lực');
 
-                  return (
-                    <div
-                      key={n.id}
-                      className={`p-4 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
-                        n.status === 'Đã thay thế'
-                          ? 'bg-slate-50/70 opacity-70'
-                          : 'hover:bg-slate-50/80 bg-white'
-                      }`}
-                    >
-                      {/* Left: Info */}
-                      <div className="space-y-1.5 min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
+                return (
+                  <div
+                    key={n.id}
+                    className={`p-4 rounded-2xl border transition-all ${
+                      n.status === 'Đã thay thế'
+                        ? 'bg-slate-50 border-slate-200 opacity-60'
+                        : n.paymentStatus === 'Đã thu'
+                        ? 'bg-emerald-50/30 border-emerald-200'
+                        : isOverdue
+                        ? 'bg-red-50/30 border-red-200'
+                        : 'bg-white border-slate-200'
+                    }`}
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
                           <span className="font-mono font-bold text-slate-900 text-sm">{n.noticeCode}</span>
-                          <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md">
+                          <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
                             Phòng {n.roomCode}
                           </span>
-                          <span className="font-mono text-slate-500">({n.periodCode})</span>
-
-                          {/* Notice Status Badge */}
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            n.status === 'Đang hiệu lực' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600 line-through'
+                          <span className="font-mono text-slate-500">{n.periodCode}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            n.paymentStatus === 'Đã thu'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : isOverdue
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-amber-100 text-amber-800'
                           }`}>
-                            {n.status}
-                          </span>
-
-                          {/* Overdue Badge (BR-UC08.1-01) */}
-                          {isOverdue && (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800 flex items-center gap-1">
-                              <AlertCircle className="w-3 h-3" />
-                              Quá hạn
-                            </span>
-                          )}
-
-                          {/* Payment Status Badge */}
-                          <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
-                            n.paymentStatus === 'Đã thu' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                          }`}>
-                            {n.paymentStatus}
+                            {n.paymentStatus === 'Đã thu' ? 'Đã thu' : isOverdue ? 'Quá hạn' : 'Chưa thu'}
                           </span>
                         </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-slate-600 text-[11px] pt-1">
-                          <div>
-                            <span className="text-slate-400">1. Thuê tiếp theo: </span>
-                            <span className="font-mono font-medium">
-                              {n.breakdown?.nextRentAmount ? `${n.breakdown.nextRentAmount.toLocaleString('vi-VN')} đ` : '0 đ'}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-slate-400">2. Dịch vụ vừa ở: </span>
-                            <span className="font-mono font-medium">
-                              {(n.totalAmount - (n.breakdown?.nextRentAmount || 0)).toLocaleString('vi-VN')} đ
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-slate-400">Hạn thanh toán: </span>
-                            <strong className="font-mono text-slate-800">{n.dueDate}</strong>
-                          </div>
+                        <div className="text-slate-500 text-[11px]">
+                          Hạn thanh toán: <strong className="font-mono text-slate-700">{n.dueDate}</strong> ·
+                          Nội dung CK: <strong className="font-mono text-slate-800">{n.qrBankSnapshot.transferContent}</strong>
                         </div>
-
-                        {relatedReceipt && (
-                          <div className="text-[11px] text-emerald-700 flex items-center gap-1.5 pt-0.5">
-                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                            <span>Đã thu ngày {relatedReceipt.receivedDate} (Mã GD: <strong className="font-mono">{relatedReceipt.transactionCode}</strong> · Người thu: {relatedReceipt.confirmedBy})</span>
-                          </div>
-                        )}
-
-                        {n.status === 'Đã thay thế' && (
-                          <p className="text-[11px] text-slate-500 italic">
-                            AF-02: Bản này đã bị thay thế; chỉ dùng để tra cứu lịch sử, không cho phép xác nhận thu tiền bằng mã QR cũ.
-                          </p>
-                        )}
                       </div>
 
-                      {/* Right: Amount & Action */}
-                      <div className="flex flex-col md:items-end justify-between gap-2 shrink-0">
+                      <div className="flex items-center gap-3">
                         <div className="text-right">
                           <span className="text-[10px] text-slate-400 block">Tổng tiền QR:</span>
-                          <span className="text-base font-bold font-mono text-blue-700">
+                          <span className="font-mono font-bold text-sm text-blue-900">
                             {n.totalAmount.toLocaleString('vi-VN')} đ
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => setInspectNotice(n)}
-                            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold text-xs flex items-center gap-1 cursor-pointer"
+                            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-medium cursor-pointer"
+                            title="Xem chi tiết"
                           >
                             <Eye className="w-3.5 h-3.5" />
-                            Chi tiết
                           </button>
 
                           {n.status === 'Đang hiệu lực' && n.paymentStatus === 'Chưa thu' && (
                             <button
                               onClick={() => openConfirmModal(n)}
-                              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer"
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer"
                             >
                               <CheckCircle2 className="w-4 h-4" />
                               Xác nhận thu đủ (UC08.2)
@@ -430,41 +376,39 @@ export const PaymentReceiptsView: React.FC = () => {
                               onClick={() => {
                                 setSelectedReceipt(relatedReceipt);
                                 setRevertReason('');
+                                setRevertError(null);
                                 setShowRevertModal(true);
                               }}
-                              className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg font-semibold text-xs flex items-center gap-1 cursor-pointer"
-                              title="Sửa xác nhận thu nhầm (AF-03)"
+                              className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 rounded-lg font-semibold text-xs flex items-center gap-1 cursor-pointer border border-amber-200"
+                              title="Sửa xác nhận thu nhầm (AF-03 / BR-UC08.2-06 & 10)"
                             >
-                              <RotateCcw className="w-3.5 h-3.5" />
-                              Sửa thu nhầm
+                              <RotateCcw className="w-3.5 h-3.5 text-amber-700" />
+                              Sửa thu nhầm (AF-03)
                             </button>
                           )}
                         </div>
                       </div>
                     </div>
-                  );
-                })
-              )}
-            </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 2: 8.2. CHỨNG TỪ & SỬA NHẦM (UC08.2)                                  */}
+      {/* TAB 2: 8.2. CHỨNG TỪ THANH TOÁN (UC08.2)                                   */}
       {/* ========================================================================= */}
       {activeTab === 'uc08_2' && (
         <div className="space-y-4">
-          <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs text-emerald-950">
             <div>
-              <h2 className="text-sm font-bold text-slate-800">UC08.2: Sổ theo dõi chứng từ thu tiền ngân hàng</h2>
-              <p className="text-xs text-slate-500">
-                Ghi nhận chứng từ xác nhận chuyển khoản ngân hàng. Cho phép sửa xác nhận thu nhầm với lý do bắt buộc và lưu toàn bộ lịch sử (AF-03).
+              <span className="font-bold block text-sm">Quản lý Chứng từ & Xác nhận Chuyển khoản (UC08.2)</span>
+              <p className="text-emerald-800 text-[11px] mt-0.5">
+                Ghi nhận chứng từ xác nhận chuyển khoản ngân hàng khớp 100% mã QR. Cho phép sửa xác nhận thu nhầm với lý do bắt buộc và bảo toàn tuyệt đối giao dịch nguồn (AF-03).
               </p>
             </div>
-            <span className="text-xs font-mono text-slate-500 font-semibold">
-              Tổng số chứng từ: {paymentReceipts.length}
-            </span>
           </div>
 
           {/* List of Receipts */}
@@ -517,28 +461,40 @@ export const PaymentReceiptsView: React.FC = () => {
                           <AlertTriangle className="w-3.5 h-3.5" />
                           <span>Chứng từ đã bị hủy hiệu lực (Sửa thu nhầm):</span>
                         </div>
-                        <p><strong>Lý do:</strong> {r.invalidatedReason}</p>
+                        <p><strong>Lý do bắt buộc:</strong> {r.invalidatedReason}</p>
                         <p className="text-[10px] text-red-700">
                           Thời gian hủy: {new Date(r.invalidatedAt || '').toLocaleString('vi-VN')} · Người hủy: {r.invalidatedBy || 'Chủ nhà'}
                         </p>
+                        <span className="inline-block px-1.5 py-0.5 bg-red-100 rounded text-[9px] font-bold text-red-800 mt-1">
+                          Giao dịch nguồn được bảo toàn – Không xóa dữ liệu
+                        </span>
                       </div>
                     )}
 
-                    {!isInvalid && (
-                      <div className="flex justify-end pt-1 border-t border-slate-100">
+                    <div className="flex justify-between items-center pt-1 border-t border-slate-100">
+                      <button
+                        onClick={() => setInspectReceiptAudit(r)}
+                        className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-medium flex items-center gap-1 cursor-pointer"
+                      >
+                        <History className="w-3 h-3 text-purple-600" />
+                        Xem lịch sử kiểm toán
+                      </button>
+
+                      {!isInvalid && (
                         <button
                           onClick={() => {
                             setSelectedReceipt(r);
                             setRevertReason('');
+                            setRevertError(null);
                             setShowRevertModal(true);
                           }}
-                          className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
+                          className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 rounded-lg font-semibold text-xs flex items-center gap-1.5 cursor-pointer border border-amber-200"
                         >
-                          <RotateCcw className="w-3.5 h-3.5" />
+                          <RotateCcw className="w-3.5 h-3.5 text-amber-700" />
                           Sửa xác nhận thu nhầm (AF-03)
                         </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 );
               })
@@ -548,11 +504,170 @@ export const PaymentReceiptsView: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
+      {/* TAB 3: 8.3. LỊCH SỬ & KIỂM TOÁN THU NHẦM (REQUIREMENT 4)                  */}
+      {/* ========================================================================= */}
+      {activeTab === 'uc08_3' && (
+        <div className="space-y-4">
+          <div className="p-4 bg-purple-50/70 border border-purple-200 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs text-purple-950">
+            <div>
+              <div className="flex items-center gap-2 font-bold text-sm">
+                <History className="w-4 h-4 text-purple-700" />
+                <span>Nhật ký Kiểm toán & Lịch sử Sửa xác nhận thu nhầm (Requirement 4)</span>
+              </div>
+              <p className="text-purple-800 text-[11px] mt-0.5">
+                Bảo toàn tuyệt đối giao dịch nguồn theo BR-UC08.2-06 & 10. Khi User sửa thu nhầm, hệ thống giữ lại bản ghi chứng từ trong lịch sử và lưu đầy đủ lý do bắt buộc, thời gian, người thực hiện.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-lg font-bold text-xs border border-purple-200">
+                {revertedReceiptsCount} lần sửa thu nhầm
+              </span>
+            </div>
+          </div>
+
+          {/* Search and Filter */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-white rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2">
+              {(['ALL', 'REVERTED', 'ACTIVE'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setAuditFilter(tab)}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                    auditFilter === tab
+                      ? 'bg-purple-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {tab === 'ALL' && 'Tất cả chứng từ'}
+                  {tab === 'REVERTED' && `Chứng từ đã sửa thu nhầm (${revertedReceiptsCount})`}
+                  {tab === 'ACTIVE' && 'Chứng từ đang hiệu lực'}
+                </button>
+              ))}
+            </div>
+
+            <div className="relative w-full sm:w-64">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+              <input
+                type="text"
+                placeholder="Tìm mã GD, phòng, lý do..."
+                value={auditSearchTerm}
+                onChange={(e) => setAuditSearchTerm(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+              />
+            </div>
+          </div>
+
+          {/* Audit History Table */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden text-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-semibold uppercase text-[11px]">
+                    <th className="py-3 px-3">Mã giao dịch nguồn</th>
+                    <th className="py-3 px-3">Phòng</th>
+                    <th className="py-3 px-3">Số tiền</th>
+                    <th className="py-3 px-3">Trạng thái hiện tại</th>
+                    <th className="py-3 px-3">Lý do sửa bắt buộc (AF-03)</th>
+                    <th className="py-3 px-3">Thời gian & Người sửa</th>
+                    <th className="py-3 px-3 text-right">Chi tiết kiểm toán</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredAuditReceipts.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-slate-400">
+                        Không có bản ghi kiểm toán nào phù hợp.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredAuditReceipts.map((r) => {
+                      const isReverted = r.status === 'Không còn hiệu lực';
+                      const latestAudit = r.auditHistory?.[r.auditHistory.length - 1];
+
+                      return (
+                        <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-3 px-3">
+                            <span className="font-mono font-bold text-slate-900 block">{r.transactionCode}</span>
+                            <span className="text-[10px] text-slate-400">ID: {r.id}</span>
+                          </td>
+                          <td className="py-3 px-3 font-semibold text-slate-800">
+                            Phòng {r.roomCode}
+                            <span className="block text-[10px] text-slate-400">{r.periodCode}</span>
+                          </td>
+                          <td className="py-3 px-3 font-mono font-bold text-blue-900">
+                            {r.amountReceived.toLocaleString('vi-VN')} đ
+                          </td>
+                          <td className="py-3 px-3">
+                            {isReverted ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 border border-red-200">
+                                <AlertTriangle className="w-3 h-3 text-red-600" />
+                                Không còn hiệu lực (Đã sửa)
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                Đang hiệu lực
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 max-w-xs">
+                            {isReverted && r.invalidatedReason ? (
+                              <div className="space-y-0.5">
+                                <span className="font-medium text-slate-800 block text-xs">
+                                  {r.invalidatedReason}
+                                </span>
+                                <span className="text-[10px] text-emerald-700 font-semibold block">
+                                  ✓ Không xóa giao dịch nguồn (BR-06 & 10)
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 text-[11px]">— Không sửa đổi —</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 text-slate-600">
+                            {isReverted && r.invalidatedAt ? (
+                              <div>
+                                <span className="font-mono text-[11px] block">
+                                  {new Date(r.invalidatedAt).toLocaleString('vi-VN')}
+                                </span>
+                                <span className="text-[10px] text-slate-500">
+                                  Bởi: <strong>{r.invalidatedBy || 'Chủ nhà'}</strong>
+                                </span>
+                              </div>
+                            ) : (
+                              <div>
+                                <span className="font-mono text-[11px] block">{r.receivedDate}</span>
+                                <span className="text-[10px] text-slate-400">Tạo bởi: {r.confirmedBy}</span>
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 text-right">
+                            <button
+                              onClick={() => setInspectReceiptAudit(r)}
+                              className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-800 rounded-lg text-xs font-semibold cursor-pointer border border-purple-200 inline-flex items-center gap-1"
+                            >
+                              <History className="w-3.5 h-3.5" />
+                              Xem dòng thời gian
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
       {/* MODAL: CONFIRM RECEIPT (UC08.2)                                           */}
       {/* ========================================================================= */}
       {showConfirmModal && selectedNotice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4 text-xs">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4 text-xs">
             <div className="flex justify-between items-center border-b border-slate-200 pb-3">
               <h3 className="font-bold text-slate-900 text-base">Xác nhận thu tiền chuyển khoản (UC08.2)</h3>
               <button
@@ -600,11 +715,9 @@ export const PaymentReceiptsView: React.FC = () => {
                   type="number"
                   value={amountReceived}
                   onChange={(e) => setAmountReceived(Number(e.target.value))}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono font-bold text-blue-700 text-sm"
+                  required
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono font-bold text-sm text-blue-900"
                 />
-                <span className="text-[10px] text-slate-400 block mt-1">
-                  BR-UC08.2-03: Chỉ xác nhận khi tiền thực vào tài khoản đúng đủ số của QR. Không hỗ trợ chuyển thiếu/thừa hoặc thanh toán một phần.
-                </span>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -616,6 +729,7 @@ export const PaymentReceiptsView: React.FC = () => {
                     type="date"
                     value={receivedDate}
                     onChange={(e) => setReceivedDate(e.target.value)}
+                    required
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono"
                   />
                 </div>
@@ -628,22 +742,23 @@ export const PaymentReceiptsView: React.FC = () => {
                     type="text"
                     value={txnCode}
                     onChange={(e) => setTxnCode(e.target.value)}
-                    placeholder="Ví dụ: FT261016..."
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono font-bold"
+                    required
+                    placeholder="Mã FT..."
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl font-mono uppercase"
                   />
                 </div>
               </div>
 
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">
-                  Chứng từ giao dịch (tùy chọn)
+                  Tệp ảnh minh chứng chuyển khoản
                 </label>
                 <input
                   type="text"
                   value={proofFile}
                   onChange={(e) => setProofFile(e.target.value)}
-                  placeholder="Tên file ảnh giao dịch ngân hàng..."
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-slate-600"
+                  placeholder="Tên tệp ảnh hoặc liên kết minh chứng..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl"
                 />
               </div>
 
@@ -668,13 +783,18 @@ export const PaymentReceiptsView: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL: REVERT RECEIPT (AF-03 / BR-UC08.2-06, BR-UC08.2-10)               */}
+      {/* MODAL: SỬA XÁC NHẬN THU NHẦM (REQUIREMENT 4: LÝ DO BẮT BUỘC & LỊCH SỬ)   */}
       {/* ========================================================================= */}
       {showRevertModal && selectedReceipt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4 text-xs">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-4 text-xs">
             <div className="flex justify-between items-center border-b border-slate-200 pb-3">
-              <h3 className="font-bold text-slate-900 text-base">Sửa xác nhận thu nhầm (AF-03)</h3>
+              <div>
+                <h3 className="font-bold text-slate-900 text-base">Sửa xác nhận thu nhầm (AF-03)</h3>
+                <span className="text-[11px] text-purple-700 font-semibold">
+                  Quy tắc BR-UC08.2-06 & 10: Không xóa giao dịch nguồn
+                </span>
+              </div>
               <button
                 onClick={() => setShowRevertModal(false)}
                 className="p-1 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
@@ -686,36 +806,64 @@ export const PaymentReceiptsView: React.FC = () => {
             {revertError && (
               <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-800 text-[11px] flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                <span>{revertError}</span>
+                <span className="font-semibold">{revertError}</span>
               </div>
             )}
 
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 space-y-1.5 text-[11px]">
-              <p className="font-bold">Quy tắc nghiệp vụ sửa thu nhầm (BR-UC08.2-06 & 10):</p>
+            {/* Callout explaining source transaction preservation */}
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 space-y-1 text-[11px]">
+              <p className="font-bold flex items-center gap-1.5 text-amber-950">
+                <ShieldAlert className="w-4 h-4 text-amber-700" />
+                Bảo toàn dữ liệu kiểm toán & giao dịch nguồn:
+              </p>
               <p>
-                Hệ thống <strong>giữ lại bản ghi chứng từ cũ trong lịch sử</strong> và đánh dấu <strong>Không còn hiệu lực</strong>, chuyển thông báo và các khoản thu liên quan về trạng thái <strong>Chưa thu</strong>, sau đó tính lại công nợ và báo cáo.
+                Hệ thống <strong>giữ lại nguyên vẹn bản ghi chứng từ nguồn</strong> trong cơ sở dữ liệu và đánh dấu trạng thái <strong>&quot;Không còn hiệu lực&quot;</strong>. Thông báo thanh toán tương ứng sẽ hoàn tác về <strong>&quot;Chưa thu&quot;</strong> để tính lại công nợ chính xác.
               </p>
             </div>
 
-            <div className="p-2.5 bg-slate-100 rounded-xl space-y-1 text-slate-700">
-              <div>Mã giao dịch hủy: <strong className="font-mono text-slate-900">{selectedReceipt.transactionCode}</strong></div>
-              <div>Số tiền: <strong className="font-mono text-blue-800">{selectedReceipt.amountReceived.toLocaleString('vi-VN')} đ</strong> (Phòng {selectedReceipt.roomCode})</div>
-              <div>Ngày ghi nhận ban đầu: <span className="font-mono">{selectedReceipt.receivedDate}</span></div>
+            <div className="p-3 bg-slate-100 rounded-xl space-y-1 text-slate-700 text-xs">
+              <div className="flex justify-between">
+                <span>Mã giao dịch ngân hàng nguồn:</span>
+                <strong className="font-mono text-slate-900">{selectedReceipt.transactionCode}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>Số tiền giao dịch:</span>
+                <strong className="font-mono text-blue-900">{selectedReceipt.amountReceived.toLocaleString('vi-VN')} đ (Phòng {selectedReceipt.roomCode})</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>Ngày xác nhận ban đầu:</span>
+                <span className="font-mono">{selectedReceipt.receivedDate}</span>
+              </div>
             </div>
 
             <form onSubmit={handleRevertSubmit} className="space-y-3.5">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Lý do sửa xác nhận thu nhầm <span className="text-red-500">*</span>
+                <label className="block font-bold text-slate-800 mb-1">
+                  Lý do sửa xác nhận thu nhầm <span className="text-red-500">* (Bắt buộc theo BR-UC08.2-06)</span>
                 </label>
                 <textarea
                   value={revertReason}
                   onChange={(e) => setRevertReason(e.target.value)}
                   rows={3}
                   required
-                  placeholder="Bắt buộc nhập lý do (Ví dụ: Thao tác nhầm nút, ngân hàng đối soát chưa vào tiền, tra soát lại giao dịch khách báo nhầm...)"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl"
+                  placeholder="Bắt buộc nhập lý do cụ thể (VD: Khách chuyển nhầm tiền cọc sang tiền thuê, thao tác nhầm nút, đối soát ngân hàng bị tra soát...)"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-amber-500"
                 />
+
+                {/* Quick suggestions */}
+                <div className="flex flex-wrap gap-1.5 pt-2">
+                  <span className="text-[10px] text-slate-500 w-full font-medium">Gợi ý lý do nhanh:</span>
+                  {QUICK_REVERT_REASONS.map((rText, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setRevertReason(rText)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] cursor-pointer transition-colors"
+                    >
+                      + {rText}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
@@ -730,10 +878,86 @@ export const PaymentReceiptsView: React.FC = () => {
                   type="submit"
                   className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold cursor-pointer shadow-xs"
                 >
-                  Xác nhận hủy hiệu lực chứng từ
+                  Xác nhận sửa thu nhầm & Lưu lịch sử
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: INSPECT RECEIPT AUDIT TIMELINE (REQUIREMENT 4)                     */}
+      {/* ========================================================================= */}
+      {inspectReceiptAudit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-4 text-xs">
+            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+              <div>
+                <h3 className="font-bold text-slate-900 text-base">
+                  Dòng thời gian Kiểm toán Chứng từ
+                </h3>
+                <span className="font-mono text-[11px] text-slate-500">
+                  Mã giao dịch: {inspectReceiptAudit.transactionCode} (Phòng {inspectReceiptAudit.roomCode})
+                </span>
+              </div>
+              <button
+                onClick={() => setInspectReceiptAudit(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-[11px] text-emerald-950 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+              <span>Giao dịch nguồn được lưu trữ vĩnh viễn trong nhật ký đối soát, không bị xóa bỏ.</span>
+            </div>
+
+            {/* Audit History Timeline */}
+            <div className="space-y-3 relative pl-4 border-l-2 border-slate-200">
+              {(inspectReceiptAudit.auditHistory || [
+                {
+                  action: 'Tạo chứng từ thu tiền',
+                  timestamp: inspectReceiptAudit.confirmedAt,
+                  user: inspectReceiptAudit.confirmedBy,
+                  transactionCode: inspectReceiptAudit.transactionCode,
+                  amount: inspectReceiptAudit.amountReceived,
+                  newStatus: 'Đang hiệu lực',
+                  details: `Xác nhận thu đủ ${inspectReceiptAudit.amountReceived.toLocaleString('vi-VN')} đ`
+                }
+              ]).map((entry, idx) => (
+                <div key={idx} className="relative space-y-1">
+                  <div className="absolute -left-[21px] top-0.5 w-3 h-3 rounded-full bg-blue-600 border-2 border-white"></div>
+                  <div className="flex items-center justify-between">
+                    <strong className="text-slate-900 text-xs">{entry.action}</strong>
+                    <span className="font-mono text-[10px] text-slate-400">
+                      {new Date(entry.timestamp).toLocaleString('vi-VN')}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-600">
+                    Người thực hiện: <strong>{entry.user}</strong>
+                  </div>
+                  {entry.reason && (
+                    <div className="p-2 bg-amber-50 text-amber-900 rounded-lg text-[11px] border border-amber-200">
+                      <strong>Lý do bắt buộc:</strong> {entry.reason}
+                    </div>
+                  )}
+                  {entry.details && (
+                    <div className="text-[10px] text-slate-500 italic">{entry.details}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-100">
+              <button
+                onClick={() => setInspectReceiptAudit(null)}
+                className="px-4 py-2 bg-slate-900 text-white rounded-xl font-semibold cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -438,14 +438,14 @@ export const PaymentNoticesView: React.FC<PaymentNoticesViewProps> = ({ onNaviga
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
                     <div>
                       <div className="flex items-center gap-2">
-                        <h2 className="text-base font-bold text-slate-900">Bảng đối chiếu khoản phải thu</h2>
+                        <h2 className="text-base font-bold text-slate-900">Bảng đối chiếu khoản phải thu (UC07.1)</h2>
                         <span className="px-2.5 py-0.5 rounded-full font-bold bg-blue-100 text-blue-800">
                           Phòng {selectedBill.roomCode}
                         </span>
                         <span className="font-mono text-slate-500">{selectedBill.periodCode}</span>
                       </div>
                       <p className="text-slate-500 mt-1">
-                        Mã bảng tính: <strong className="font-mono text-slate-700">{selectedBill.id}</strong> (Phiên bản {selectedBill.version})
+                        Mã bảng tính: <strong className="font-mono text-slate-700">{selectedBill.id}</strong> (Phiên bản {selectedBill.version}) · Hợp đồng: <strong className="font-mono">{selectedBill.leaseId}</strong>
                       </p>
                     </div>
 
@@ -453,11 +453,11 @@ export const PaymentNoticesView: React.FC<PaymentNoticesViewProps> = ({ onNaviga
                       <button
                         onClick={() => setShowBillSourceModal(true)}
                         className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold flex items-center gap-1.5 cursor-pointer"
+                        title="AF-02: Kiểm tra nguồn dữ liệu từ TT-03"
                       >
                         <Eye className="w-3.5 h-3.5" />
-                        Xem lại TT-03 (AF-02)
+                        Xem lại nguồn TT-03 (AF-02)
                       </button>
-
                       <button
                         onClick={handlePerformCheck}
                         className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold flex items-center gap-1.5 shadow-xs cursor-pointer"
@@ -468,7 +468,38 @@ export const PaymentNoticesView: React.FC<PaymentNoticesViewProps> = ({ onNaviga
                     </div>
                   </div>
 
-                  {/* 2 Separate Groups Table */}
+                  {/* EF-01 Warning: Bill not confirmed */}
+                  {!selectedBill.isConfirmed && (
+                    <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl space-y-2 text-amber-900">
+                      <div className="flex items-center gap-2 font-bold text-xs text-amber-950">
+                        <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
+                        <span>EF-01: Bảng tính tiền nguồn chưa được xác nhận tại UC-TT-03</span>
+                      </div>
+                      <p className="text-[11px] text-amber-800">
+                        Theo điều kiện tiên quyết của UC07.1 và BR-UC07.1-01, nguồn tiền phải thu là bảng tính tiền đã xác nhận. Vui lòng xác nhận bảng tính trước khi đối chiếu và lập thông báo.
+                      </p>
+                      <div className="pt-1">
+                        <button
+                          onClick={() => setShowBillSourceModal(true)}
+                          className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold cursor-pointer"
+                        >
+                          Xem chi tiết & Chuyển sang TT-03 →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* EF-02 Notification: Version updated */}
+                  {selectedBill.version > 1 && (
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 text-[11px] flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Sparkles className="w-4 h-4 text-blue-600" />
+                        <strong>EF-02:</strong> Bảng tính nguồn đã có phiên bản điều chỉnh (v{selectedBill.version}). Dữ liệu đã tự động đồng bộ để đối chiếu mới nhất.
+                      </span>
+                    </div>
+                  )}
+
+                  {/* 2 Separate Groups Table (BR-UC07.1-02) */}
                   <div className="space-y-4">
                     {/* Nhóm 1: Tiền thuê kỳ tiếp theo */}
                     <div className="p-4 border border-blue-200 bg-blue-50/30 rounded-xl space-y-2.5">
@@ -477,28 +508,33 @@ export const PaymentNoticesView: React.FC<PaymentNoticesViewProps> = ({ onNaviga
                           <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-[10px]">1</span>
                           <span className="font-bold text-sm text-blue-950">Nhóm 1: Tiền thuê kỳ tiếp theo (Trả trước)</span>
                         </div>
-                        <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                        <span className={`px-2.5 py-0.5 rounded text-[11px] font-bold ${
                           selectedBill.isRentPeriodEnded
                             ? 'bg-purple-100 text-purple-800'
-                            : 'bg-amber-100 text-amber-800'
+                            : (currentReconciliation?.nextRentStatus === 'Đã thu' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800')
                         }`}>
-                          {selectedBill.isRentPeriodEnded ? 'Không phát sinh khi trả phòng' : 'Chưa thanh toán'}
+                          {selectedBill.isRentPeriodEnded
+                            ? 'Không phát sinh khi trả phòng (BR-04)'
+                            : (currentReconciliation?.nextRentStatus === 'Đã thu' ? 'Đã thu trước (BR-03/06)' : 'Chưa thanh toán')}
                         </span>
                       </div>
-
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-blue-100 text-slate-700">
                         <div>
                           <span className="text-slate-400 block text-[11px]">Khoảng thời gian thuê:</span>
                           <span className="font-mono font-medium">{selectedBill.nextRentPeriodFrom} → {selectedBill.nextRentPeriodTo}</span>
                         </div>
                         <div>
-                          <span className="text-slate-400 block text-[11px]">Quy định hợp đồng:</span>
-                          <span>{selectedBill.isRentPeriodEnded ? 'Khách đã trả phòng, dừng tính tiền thuê' : 'Thanh toán đầu kỳ trước ngày nhận phòng'}</span>
+                          <span className="text-slate-400 block text-[11px]">Quy tắc hợp đồng:</span>
+                          <span>
+                            {selectedBill.isRentPeriodEnded
+                              ? 'Khách đã trả phòng thực tế, dừng tính tiền thuê'
+                              : (currentReconciliation?.nextRentPrepaidAtPH07 ? 'Đã thanh toán tháng đầu tại PH-07' : 'Thu trước đầu kỳ')}
+                          </span>
                         </div>
                         <div className="text-right">
-                          <span className="text-slate-400 block text-[11px]">Số tiền thuê kỳ tiếp theo:</span>
+                          <span className="text-slate-400 block text-[11px]">Số tiền thuê kỳ tới:</span>
                           <span className="font-mono font-bold text-blue-800 text-sm">
-                            {selectedBill.isRentPeriodEnded ? '0 đ' : `${selectedBill.nextMonthRentAmount.toLocaleString('vi-VN')} đ`}
+                            {selectedBill.isRentPeriodEnded ? '0 đ' : `${(currentReconciliation?.nextRentAmount ?? selectedBill.nextMonthRentAmount).toLocaleString('vi-VN')} đ`}
                           </span>
                         </div>
                       </div>
@@ -511,15 +547,13 @@ export const PaymentNoticesView: React.FC<PaymentNoticesViewProps> = ({ onNaviga
                           <span className="w-5 h-5 rounded-full bg-slate-700 text-white flex items-center justify-center font-bold text-[10px]">2</span>
                           <span className="font-bold text-sm text-slate-900">Nhóm 2: Tiền điện, nước & phí dịch vụ vừa sử dụng (Trả sau)</span>
                         </div>
-                        <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800">
+                        <span className="px-2.5 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800">
                           Chưa thanh toán
                         </span>
                       </div>
-
                       <p className="text-[11px] text-slate-500">
                         Kỳ tính dịch vụ: <strong className="font-mono text-slate-700">{selectedBill.servicePeriodFrom} → {selectedBill.servicePeriodTo}</strong>
                       </p>
-
                       <div className="space-y-1.5 pt-2 border-t border-slate-200">
                         <div className="flex justify-between py-1 border-b border-slate-100">
                           <span>Điện năng tiêu thụ ({selectedBill.electricityUsage} kWh × {selectedBill.electricityRate.toLocaleString()} đ):</span>
@@ -542,15 +576,15 @@ export const PaymentNoticesView: React.FC<PaymentNoticesViewProps> = ({ onNaviga
                           </div>
                         )}
                         <div className="flex justify-between pt-1.5 font-bold text-slate-900 text-xs">
-                          <span>Tổng cộng dịch vụ vừa ở:</span>
+                          <span>Tổng dịch vụ vừa sử dụng:</span>
                           <span className="font-mono text-blue-700">
-                            {((selectedBill.totalAmount - (selectedBill.isRentPeriodEnded ? 0 : selectedBill.nextMonthRentAmount))).toLocaleString('vi-VN')} đ
+                            {(selectedBill.totalAmount - (selectedBill.isRentPeriodEnded ? 0 : selectedBill.nextMonthRentAmount)).toLocaleString('vi-VN')} đ
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Khu vực Nợ cũ kỳ trước (BR-UC07.1-01, BR-UC07.1-05) */}
+                    {/* Khu vực Nợ cũ kỳ trước (BR-UC07.1-01, BR-UC07.1-05: chỉ tra cứu, không cộng dồn) */}
                     {(() => {
                       const oldDebtNotice = paymentNotices.find(n =>
                         n.roomCode === selectedBill.roomCode &&
@@ -558,7 +592,6 @@ export const PaymentNoticesView: React.FC<PaymentNoticesViewProps> = ({ onNaviga
                         n.status === 'Đang hiệu lực' &&
                         n.periodCode !== selectedBill.periodCode
                       );
-
                       if (oldDebtNotice) {
                         return (
                           <div className="p-4 border border-amber-300 bg-amber-50 rounded-xl space-y-2">
@@ -597,44 +630,90 @@ export const PaymentNoticesView: React.FC<PaymentNoticesViewProps> = ({ onNaviga
                       );
                     })()}
 
-                    {/* Reconciliation Result Banner */}
+                    {/* Reconciliation Result Banner (Bước 2 hoàn tất) */}
                     {reconcileCheckDone && currentReconciliation && (
-                      <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-xl space-y-2">
+                      <div className={`p-4 rounded-xl border space-y-2 transition-all ${
+                        currentReconciliation.netReceivableAmount === 0
+                          ? 'bg-emerald-100/70 border-emerald-400 text-emerald-950'
+                          : 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                      }`}>
                         <div className="flex items-center justify-between">
-                          <span className="font-bold text-emerald-950 text-sm flex items-center gap-1.5">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span className="font-bold text-sm flex items-center gap-1.5">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-700" />
                             Kết quả kiểm tra đối chiếu (Bước 2 hoàn tất)
                           </span>
                           <span className="font-mono text-xs font-bold text-emerald-900">
                             Mã: {currentReconciliation.id}
                           </span>
                         </div>
-                        <div className="flex justify-between items-center text-xs pt-1 border-t border-emerald-200">
-                          <span className="text-emerald-800">
-                            Số tiền còn phải thu thực tế (đã loại cọc & tiền thuê trả trước):
-                          </span>
-                          <strong className="font-mono text-base text-blue-900">
-                            {currentReconciliation.netReceivableAmount.toLocaleString('vi-VN')} đ
-                          </strong>
+
+                        {/* Breakdown of exclusions */}
+                        <div className="p-2.5 bg-white/80 rounded-lg space-y-1 text-[11px] text-slate-700 border border-emerald-200">
+                          <div className="font-semibold text-slate-800">Các khoản đã loại trừ theo quy định:</div>
+                          <ul className="list-disc list-inside space-y-0.5 text-slate-600">
+                            <li><strong>Tiền cọc phòng (BR-UC07.1-05):</strong> Không trừ vào kỳ thu này (chỉ hoàn trả tại quyết toán hoàn cọc TT-05).</li>
+                            {currentReconciliation.nextRentPrepaidAtPH07 && (
+                              <li><strong>Tiền thuê kỳ đầu (BR-UC07.1-03):</strong> Đã thanh toán tại biên bản bàn giao nhận phòng PH-07, không thu lại.</li>
+                            )}
+                            {selectedBill.isRentPeriodEnded && (
+                              <li><strong>Tiền thuê kỳ sau trả phòng (BR-UC07.1-04):</strong> Kỳ cuối sau khi nhận lại phòng, ngừng sinh tiền thuê.</li>
+                            )}
+                          </ul>
                         </div>
+
+                        {/* AF-01 Notice if net amount is 0 */}
+                        {currentReconciliation.netReceivableAmount === 0 ? (
+                          <div className="p-3 bg-emerald-200/60 border border-emerald-400 rounded-lg text-emerald-950 space-y-1">
+                            <div className="font-bold flex items-center gap-1.5 text-xs">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-800" />
+                              AF-01: Không có khoản còn phải thu (Tổng = 0 đ)
+                            </div>
+                            <p className="text-[11px]">
+                              Trạng thái: <strong>Đã thanh toán</strong>. Hệ thống <strong>không tạo khoản phải thu mới</strong> và <strong>không tạo mã QR có số tiền bằng 0 đ</strong>.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="flex justify-between items-center text-xs pt-1 border-t border-emerald-200">
+                            <span className="text-emerald-900 font-medium">
+                              Số tiền còn phải thanh toán thực tế (Chưa thu):
+                            </span>
+                            <strong className="font-mono text-base text-blue-900 font-extrabold">
+                              {currentReconciliation.netReceivableAmount.toLocaleString('vi-VN')} đ
+                            </strong>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
 
                   {/* Actions for UC07.1 */}
-                  <div className="flex items-center justify-between pt-4 border-t border-slate-200">
-                    <span className="text-slate-400 text-[11px]">
-                      Điều kiện sau: Lưu kết quả kiểm tra các khoản Chưa thu của kỳ để tạo thông báo UC07.2.
-                    </span>
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-200">
+                    <div className="space-y-1 text-[11px] text-slate-500">
+                      <span>Điều kiện sau: Lưu kết quả kiểm tra các khoản Chưa thu của kỳ để tạo thông báo UC07.2.</span>
+                      {reconcileCheckDone && (
+                        <span className="block text-blue-700">
+                          * Phát hiện sai sót? Bấm &quot;Xem lại nguồn TT-03 (AF-02)&quot; để điều chỉnh lại trước khi xác nhận.
+                        </span>
+                      )}
+                    </div>
 
-                    <button
-                      disabled={!reconcileCheckDone || !currentReconciliation}
-                      onClick={handleConfirmReconciliation}
-                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl font-bold flex items-center gap-2 shadow-xs cursor-pointer transition-all"
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      Xác nhận đối chiếu & Lập thông báo (UC07.2) →
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {currentReconciliation?.netReceivableAmount === 0 ? (
+                        <div className="px-4 py-2 bg-emerald-100 text-emerald-800 rounded-xl font-bold text-xs flex items-center gap-1.5 border border-emerald-300">
+                          <CheckCircle2 className="w-4 h-4" />
+                          Đã thanh toán đủ – Không tạo QR 0đ (AF-01)
+                        </div>
+                      ) : (
+                        <button
+                          disabled={!reconcileCheckDone || !currentReconciliation || !selectedBill.isConfirmed}
+                          onClick={handleConfirmReconciliation}
+                          className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl font-bold flex items-center gap-2 shadow-xs cursor-pointer transition-all"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          Bước 3: Xác nhận đối chiếu & Lập thông báo (UC07.2) →
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ) : (

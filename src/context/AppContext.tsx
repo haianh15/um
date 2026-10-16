@@ -226,7 +226,7 @@ interface AppContextType {
   saveMeterReadingTT01: (reading: MeterReading) => void;
   updateMeterReadingTT02: (readingId: string, updates: Partial<MeterReading>, reason: string) => void;
   generatePeriodBillTT03: (roomCode: string, periodCode: string) => { success: boolean; billId?: string; message: string };
-  confirmPeriodBillTT03: (billId: string) => void;
+  confirmPeriodBillTT03: (billId: string) => { success: boolean; message: string };
 
   // Payment Notices (QT07)
   reconciliations: ReceivableReconciliation[];
@@ -1942,11 +1942,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const confirmPeriodBillTT03 = (billId: string) => {
+    const bill = periodBills.find(b => b.id === billId);
+    if (!bill) return { success: false, message: 'EF-01: Không tìm thấy bảng tính tiền.' };
+
+    // Kiểm tra cờ Chờ xác minh của chỉ số điện nước theo UC-TT-01 Bước 6
+    const reading = meterReadings.find(m => m.roomCode === bill.roomCode && m.periodCode === bill.periodCode);
+    if (reading && reading.pendingVerificationFlag) {
+      return {
+        success: false,
+        message: 'UC-TT-01 Bước 6: Chỉ số điện nước của phòng đang gắn cờ "Chờ xác minh" bất thường (AF-02). Chưa thể xác nhận bảng tính tiền TT-03 cho đến khi kiểm tra và xác minh xong.'
+      };
+    }
+
     setPeriodBills(prev => prev.map(b => b.id === billId ? {
       ...b,
       isConfirmed: true,
       confirmedAt: new Date().toISOString()
     } : b));
+    return { success: true, message: 'Đã xác nhận bảng tính tiền thành công (UC-TT-03)!' };
   };
 
   // ==================== PAYMENT NOTICES (QT07: UC07.1 -> UC07.3) ====================
@@ -2028,6 +2041,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         noticeId: overdueDebt.id
       } : undefined,
       netReceivableAmount: netReceivable,
+      isZeroBalance: netReceivable === 0,
+      zeroBalanceMessage: netReceivable === 0
+        ? 'AF-01: Không có khoản còn phải thu (Tổng = 0 đ). Trạng thái: Đã thanh toán. Không tạo khoản phải thu mới và không tạo mã QR có số tiền bằng 0.'
+        : undefined,
       isReconciled: false
     };
 
@@ -2037,7 +2054,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return {
         success: true,
         result,
-        message: 'AF-01: Tổng số tiền còn phải thu bằng 0 đ (Đã thanh toán trước/Không phát sinh). Không tạo mã QR số tiền bằng 0.'
+        message: 'AF-01: Tổng số tiền còn phải thu bằng 0 đ (Đã thanh toán trước/Không phát sinh). Trạng thái Đã thanh toán, không tạo mã QR 0 đ.'
       };
     }
 
@@ -2266,6 +2283,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const receiptId = 'rcp_' + Date.now().toString().slice(-6);
+    const actor = currentUser?.fullName || 'Chủ nhà';
+    const nowIso = new Date().toISOString();
     const receipt: PaymentReceipt = {
       id: receiptId,
       noticeId,
@@ -2274,13 +2293,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       periodCode: notice.periodCode,
       amountReceived: amount,
       receivedDate,
-      transactionCode,
+      transactionCode: transactionCode.trim(),
       bankAccountReceived,
       paymentMethod: 'Chuyển khoản ngân hàng',
       proofFile,
       status: 'Đang hiệu lực',
-      confirmedBy: currentUser?.fullName || 'Chủ nhà',
-      confirmedAt: new Date().toISOString()
+      confirmedBy: actor,
+      confirmedAt: nowIso,
+      auditHistory: [
+        {
+          action: 'Tạo chứng từ thu tiền (UC08.2)',
+          timestamp: nowIso,
+          user: actor,
+          transactionCode: transactionCode.trim(),
+          amount,
+          newStatus: 'Đang hiệu lực',
+          details: `Xác nhận thu đủ ${amount.toLocaleString('vi-VN')} đ vào ${bankAccountReceived} qua mã giao dịch ${transactionCode.trim()}`
+        }
+      ]
     };
 
     setPaymentReceipts(prev => [receipt, ...prev]);
@@ -2297,25 +2327,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const receipt = paymentReceipts.find(r => r.id === receiptId);
     if (!receipt) return { success: false, message: 'EF-01: Không tìm thấy chứng từ thu tiền.' };
 
-    if (!reason.trim()) {
+    const trimmedReason = reason?.trim();
+    if (!trimmedReason) {
       return { success: false, message: 'EF-04 / BR-UC08.2-06: Lý do sửa xác nhận thu nhầm là trường bắt buộc.' };
     }
+
+    const nowIso = new Date().toISOString();
+    const actor = currentUser?.fullName || 'Chủ nhà';
+
+    // BR-UC08.2-06 & 10: Không xóa giao dịch nguồn, bảo toàn số liệu cho đối soát
+    const newAuditEntry = {
+      action: 'Sửa xác nhận thu nhầm (AF-03)',
+      timestamp: nowIso,
+      user: actor,
+      reason: trimmedReason,
+      previousStatus: receipt.status,
+      newStatus: 'Không còn hiệu lực',
+      transactionCode: receipt.transactionCode,
+      amount: receipt.amountReceived,
+      details: `Hủy hiệu lực xác nhận thu tiền. Giữ nguyên giao dịch nguồn ${receipt.transactionCode} để bảo toàn lịch sử kế toán.`
+    };
 
     setPaymentReceipts(prev => prev.map(r => r.id === receiptId ? {
       ...r,
       status: 'Không còn hiệu lực' as const,
-      invalidatedReason: reason.trim(),
-      invalidatedAt: new Date().toISOString(),
-      invalidatedBy: currentUser?.fullName || 'Chủ nhà'
+      invalidatedReason: trimmedReason,
+      invalidatedAt: nowIso,
+      invalidatedBy: actor,
+      auditHistory: [...(r.auditHistory || []), newAuditEntry]
     } : r));
 
+    // Hoàn tác trạng thái thông báo thanh toán tương ứng về Chưa thu
     setPaymentNotices(prev => prev.map(n => n.id === receipt.noticeId ? {
       ...n,
       paymentStatus: 'Chưa thu'
     } : n));
 
-    logSecurity('PAYMENT_REVERTED_08_2', `Receipt ${receipt.transactionCode} invalidated: ${reason.trim()}`);
-    return { success: true, message: 'Đã sửa xác nhận thu nhầm (AF-03). Thông báo thanh toán đã quay lại trạng thái Chưa thu và tính lại công nợ.' };
+    logSecurity('PAYMENT_REVERTED_08_2', `Receipt ${receipt.transactionCode} invalidated: ${trimmedReason}. Source txn preserved.`);
+    return { success: true, message: 'Đã sửa xác nhận thu nhầm (AF-03)! Giao dịch nguồn được bảo toàn trong lịch sử kiểm toán và thông báo thanh toán đã quay lại trạng thái Chưa thu.' };
   };
 
   // ==================== DEBTS (QT09) ====================

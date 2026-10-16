@@ -665,6 +665,8 @@ export interface ReceivableReconciliation {
     noticeId?: string;
   };
   netReceivableAmount: number; // Tổng tiền còn phải trả thực tế sau khi kiểm tra
+  isZeroBalance?: boolean; // AF-01: Tổng tiền = 0 không tạo khoản thu mới, không tạo QR 0đ
+  zeroBalanceMessage?: string;
   isReconciled: boolean;
   reconciledAt?: string;
   reconciledBy?: string;
@@ -722,6 +724,18 @@ export interface PaymentNotice {
 }
 
 // ==================== QUY TRÌNH 08: THU TIỀN ====================
+export interface ReceiptAuditEntry {
+  action: string; // 'Tạo chứng từ thu' | 'Sửa xác nhận thu nhầm (AF-03)' | 'Khôi phục'
+  timestamp: string;
+  user: string;
+  reason?: string;
+  previousStatus?: string;
+  newStatus?: string;
+  transactionCode: string;
+  amount: number;
+  details?: string;
+}
+
 export interface PaymentReceipt {
   id: string;
   noticeId: string;
@@ -740,6 +754,7 @@ export interface PaymentReceipt {
   invalidatedBy?: string;
   confirmedBy: string;
   confirmedAt: string;
+  auditHistory?: ReceiptAuditEntry[]; // Lịch sử thay đổi / sửa thu nhầm không xóa giao dịch nguồn
 }
 
 // ==================== QUY TRÌNH 09: CÔNG NỢ ====================

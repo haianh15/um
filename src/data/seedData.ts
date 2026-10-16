@@ -1010,7 +1010,18 @@ export const INITIAL_PAYMENT_RECEIPTS: PaymentReceipt[] = [
     proofFile: 'anh_chuyen_khoan_mb_101.jpg',
     status: 'Đang hiệu lực',
     confirmedBy: 'Nguyễn Văn An',
-    confirmedAt: '2026-10-04T14:20:00Z'
+    confirmedAt: '2026-10-04T14:20:00Z',
+    auditHistory: [
+      {
+        action: 'Tạo chứng từ thu',
+        timestamp: '2026-10-04T14:20:00Z',
+        user: 'Nguyễn Văn An (Chủ nhà)',
+        transactionCode: 'FT2610049988123',
+        amount: 4350000,
+        newStatus: 'Đang hiệu lực',
+        details: 'Xác nhận thu đủ 4.350.000 đ qua chuyển khoản MB Bank khớp mã TB-101-2026-10'
+      }
+    ]
   }
 ];
 
