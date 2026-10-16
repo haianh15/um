@@ -5,7 +5,7 @@ import {
   Home, Plus, Search, Filter, CheckCircle2, AlertCircle, Clock,
   Calendar, Eye, Edit3, ArrowRight, ShieldCheck, Key, FileText, CheckSquare, X,
   Info, ExternalLink, UserCheck, PackageCheck, Receipt, Scale, AlertTriangle, ArrowUpRight,
-  History, ArrowLeft, RotateCcw, Building2
+  History, ArrowLeft, RotateCcw, Building2, FileCheck2
 } from 'lucide-react';
 
 export const RoomsView: React.FC = () => {
@@ -133,7 +133,9 @@ export const RoomsView: React.FC = () => {
   const [pay07SelectedRecordId, setPay07SelectedRecordId] = useState<string | null>(null);
 
   // Check In 05 Form (UC-PH-05)
-  const [checkInStage, setCheckInStage] = useState<'pre_handover' | 'post_handover'>('pre_handover');
+  const [checkInStep, setCheckInStep] = useState<number>(1);
+  const [checkInPreHandoverChecked, setCheckInPreHandoverChecked] = useState(false);
+  const [checkInPostHandoverChecked, setCheckInPostHandoverChecked] = useState(false);
   const [checkInDate, setCheckInDate] = useState('2026-10-16');
   const [checkInSimulateEF01, setCheckInSimulateEF01] = useState(false);
   const [checkInSimulateEF02, setCheckInSimulateEF02] = useState(false);
@@ -146,6 +148,7 @@ export const RoomsView: React.FC = () => {
   const [missingStopContent, setMissingStopContent] = useState('');
 
   // Return Check 08 Form (UC-PH-08)
+  const [returnChecked, setReturnChecked] = useState(false);
   const [returnSimulateEF01, setReturnSimulateEF01] = useState(false);
   const [returnSimulateAF05, setReturnSimulateAF05] = useState(false);
   const [returnActualDate, setReturnActualDate] = useState('2026-10-16');
@@ -154,6 +157,7 @@ export const RoomsView: React.FC = () => {
   const [unfinishedReason, setUnfinishedReason] = useState('Khách còn đồ đạc cá nhân chưa dọn hết');
   const [unfinishedObstacle, setUnfinishedObstacle] = useState('Tủ quần áo còn đồ đạc, hẹn thứ Bảy quay lại dọn nốt.');
   const [unfinishedExistingId, setUnfinishedExistingId] = useState<string | null>(null);
+  const [unfinishedEditMode, setUnfinishedEditMode] = useState(false);
 
   // Expected date 11/12 Form
   const [expDateInput, setExpDateInput] = useState('');
@@ -3550,17 +3554,85 @@ export const RoomsView: React.FC = () => {
                 </button>
               </div>
 
-              {/* Thông tin hồ sơ nguồn (Giao diện mục 1) */}
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
-                <div>Mã phòng: <strong className="font-mono text-slate-900">{selectedRoom.roomCode}</strong></div>
-                <div>Khách nhận: <strong className="text-slate-900">{selectedRoom.currentTenantName || targetContract?.tenantName || 'Chưa ghi nhận'}</strong></div>
-                <div>Hợp đồng: <strong className="font-mono text-slate-900">{targetContract?.id || selectedRoom.currentContractId || '—'}</strong></div>
-                <div>Trạng thái phòng: <strong className="text-blue-800">{selectedRoom.status}</strong></div>
+              {/* Thông tin hồ sơ nguồn (Giao diện mục 1: chỉ xem, không sửa) */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-[11px]">
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Mã phòng</span>
+                  <strong className="font-mono text-slate-900 text-xs">{selectedRoom.roomCode}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Khách nhận</span>
+                  <strong className="text-slate-900 text-xs">{selectedRoom.currentTenantName || targetContract?.tenantName || 'Chưa ghi nhận'}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Hợp đồng & Lần thuê</span>
+                  <strong className="font-mono text-slate-900 text-xs">{targetContract?.id || selectedRoom.currentContractId || '—'} ({selectedRoom.currentLeaseId || 'THUE-' + selectedRoom.roomCode})</strong>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-semibold">Trạng thái phòng</span>
+                  <span className={`inline-block font-bold px-2 py-0.5 rounded text-[11px] ${
+                    selectedRoom.status === 'Đang thuê' ? 'bg-blue-100 text-blue-800' :
+                    selectedRoom.status === 'Trống' ? 'bg-emerald-100 text-emerald-800' :
+                    'bg-amber-100 text-amber-800'
+                  }`}>
+                    {selectedRoom.status}
+                  </span>
+                </div>
               </div>
 
-              {/* Toggles mô phỏng ngoại lệ EF-01, EF-02 */}
-              <div className="p-2.5 bg-slate-100/70 rounded-lg flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600">
-                <span className="font-semibold text-slate-700">Mô phỏng kiểm thử ngoại lệ:</span>
+              {/* 5-Step Flow Stepper (Luồng chính Bước 1 -> Bước 5) */}
+              <div className="p-3 bg-slate-100/80 rounded-xl border border-slate-200/80">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                  Tiến trình nhận phòng chuẩn hóa theo A1 (BR-UC.PH.05-09):
+                </div>
+                <div className="grid grid-cols-5 gap-1.5 text-center">
+                  <div className={`p-1.5 rounded-lg border transition-all ${
+                    checkInStep >= 1 ? 'bg-blue-50 border-blue-300 text-blue-900 font-bold' : 'bg-white border-slate-200 text-slate-400'
+                  }`}>
+                    <span className="w-4 h-4 mx-auto mb-1 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">1</span>
+                    <span className="text-[10px] leading-tight block">Mở tiếp nhận</span>
+                  </div>
+                  <div className={`p-1.5 rounded-lg border transition-all ${
+                    checkInPreHandoverChecked ? 'bg-emerald-50 border-emerald-300 text-emerald-900 font-bold' :
+                    checkInStep === 2 ? 'bg-blue-50 border-blue-300 text-blue-900 font-bold' : 'bg-white border-slate-200 text-slate-400'
+                  }`}>
+                    <span className={`w-4 h-4 mx-auto mb-1 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                      checkInPreHandoverChecked ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-700'
+                    }`}>2</span>
+                    <span className="text-[10px] leading-tight block">Trước bàn giao</span>
+                  </div>
+                  <div className={`p-1.5 rounded-lg border transition-all ${
+                    checkInHandoverSigned ? 'bg-emerald-50 border-emerald-300 text-emerald-900 font-bold' : 'bg-white border-slate-200 text-slate-400'
+                  }`}>
+                    <span className={`w-4 h-4 mx-auto mb-1 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                      checkInHandoverSigned ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-700'
+                    }`}>3</span>
+                    <span className="text-[10px] leading-tight block">Bàn giao giấy</span>
+                  </div>
+                  <div className={`p-1.5 rounded-lg border transition-all ${
+                    checkInPostHandoverChecked ? 'bg-emerald-50 border-emerald-300 text-emerald-900 font-bold' :
+                    checkInStep === 4 ? 'bg-blue-50 border-blue-300 text-blue-900 font-bold' : 'bg-white border-slate-200 text-slate-400'
+                  }`}>
+                    <span className={`w-4 h-4 mx-auto mb-1 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                      checkInPostHandoverChecked ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-700'
+                    }`}>4</span>
+                    <span className="text-[10px] leading-tight block">Đối chiếu sau BG</span>
+                  </div>
+                  <div className={`p-1.5 rounded-lg border transition-all ${
+                    selectedRoom.status === 'Đang thuê' ? 'bg-blue-600 text-white font-bold border-blue-700' :
+                    allFourPassed ? 'bg-emerald-100 border-emerald-400 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-400'
+                  }`}>
+                    <span className={`w-4 h-4 mx-auto mb-1 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                      selectedRoom.status === 'Đang thuê' ? 'bg-white text-blue-700' : 'bg-slate-300 text-slate-700'
+                    }`}>5</span>
+                    <span className="text-[10px] leading-tight block">Xác nhận Đang thuê</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Toggles mô phỏng kiểm thử ngoại lệ EF-01, EF-02 */}
+              <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600">
+                <span className="font-semibold text-slate-700">Mô phỏng kiểm thử ngoại lệ (EF-01 & EF-02):</span>
                 <div className="flex items-center gap-3">
                   <label className="flex items-center gap-1 cursor-pointer">
                     <input
@@ -3580,101 +3652,223 @@ export const RoomsView: React.FC = () => {
                     />
                     <span>EF-02 (HĐ chưa có hiệu lực)</span>
                   </label>
+                  <label className="flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={checkInHandoverSigned}
+                      onChange={(e) => setCheckInHandoverSigned(e.target.checked)}
+                      className="rounded border-slate-300 text-emerald-600"
+                    />
+                    <span>UC-BG03 đã ký tay 2 bên</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Thao tác Bước 2 & Bước 4 */}
+              <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-blue-50/70 border border-blue-200 rounded-xl">
+                <span className="font-bold text-blue-950 text-xs">Thao tác kiểm tra theo thứ tự sơ đồ A1:</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setCheckInPreHandoverChecked(true);
+                      setCheckInStep(2);
+                      if (contractCriteria === 'Đạt' && depositCriteria === 'Đạt' && rentCriteria === 'Đạt') {
+                        showToast('success', 'Kiểm tra trước bàn giao ĐẠT: HĐ có hiệu lực, 1 tháng cọc & 1 tháng thuê đầu đã thu đủ tại UC-PH-07. Tiến hành bàn giao thực tế (Bước 3).');
+                      } else {
+                        showToast('error', 'Kiểm tra trước bàn giao CHƯA ĐẠT: Không cho nhận phòng trước rồi nộp bổ sung. Vui lòng tra soát tại UC-PH-07 / UC-PH-06.');
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-xs cursor-pointer shadow-xs flex items-center gap-1"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Bước 2: Kiểm tra trước bàn giao
+                  </button>
+                  <button
+                    onClick={() => {
+                      setCheckInPostHandoverChecked(true);
+                      setCheckInStep(4);
+                      if (allFourPassed) {
+                        showToast('success', 'Đối chiếu sau bàn giao ĐẠT: Cả 4 tiêu chí đều Đạt, số điện nước ban đầu và chữ ký 2 bên đã hợp lệ. Sẵn sàng xác nhận nhận phòng (Bước 5).');
+                      } else {
+                        showToast('error', 'Đối chiếu sau bàn giao: Còn tiêu chí Chưa đạt hoặc Chưa xác minh. Vui lòng kiểm tra chi tiết bên dưới.');
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold text-xs cursor-pointer shadow-xs flex items-center gap-1"
+                  >
+                    <FileCheck2 className="w-3.5 h-3.5" />
+                    Bước 4: Đối chiếu sau bàn giao
+                  </button>
                 </div>
               </div>
 
               {/* Bốn tiêu chí với 3 kết quả riêng Đạt / Chưa đạt / Chưa xác minh (Giao diện mục 3) */}
               <div className="space-y-2.5">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700 block">
-                  Đối chiếu 4 tiêu chí bắt buộc theo thứ tự quy trình A1 (BR-UC.PH.05-09):
+                  Bảng đối chiếu 4 tiêu chí bắt buộc (BR-UC.PH.05-01 → BR-UC.PH.05-09):
                 </span>
 
-                {/* Tiêu chí 1: Hợp đồng */}
-                <div className="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-1.5 font-semibold text-slate-900">
-                      <span>1. Hợp đồng đã ký &amp; đang có hiệu lực</span>
+                {/* Tiêu chí 1: Hợp đồng đã ký & đang có hiệu lực */}
+                <div className={`p-3 rounded-xl border transition-all ${
+                  contractCriteria === 'Đạt' ? 'bg-emerald-50/70 border-emerald-300' :
+                  contractCriteria === 'Chưa xác minh' ? 'bg-amber-50/70 border-amber-300' :
+                  'bg-red-50/70 border-red-300'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                        <span>1. Hợp đồng đã ký và đang có hiệu lực pháp lý</span>
+                      </div>
+                      <span className="text-[11px] text-slate-600 block mt-0.5">
+                        Căn cứ: Hợp đồng <strong>{targetContract?.id || 'Chưa lập'}</strong> ({targetContract?.status || 'Chưa ký'}) · Ngày ký: {targetContract?.signedDate || 'Chưa ký'}
+                      </span>
+                      {contractCriteria !== 'Đạt' && (
+                        <span className="text-[10px] text-red-700 font-semibold block mt-0.5">
+                          Lý do: Hợp đồng chưa được ký giấy hợp lệ hoặc chưa có hiệu lực theo UC-HDT-02.
+                        </span>
+                      )}
                     </div>
-                    <span className="text-[11px] text-slate-500 block">
-                      Căn cứ: Hợp đồng {targetContract?.id || '—'} ({targetContract?.status || 'Chưa ký'})
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => { setShowCheckInModal(false); setShowContractModal(true); }}
+                        className="px-2 py-1 bg-white hover:bg-slate-100 text-blue-700 rounded border border-blue-200 text-xs font-semibold cursor-pointer"
+                      >
+                        Xem HĐ
+                      </button>
+                      <span className={`px-2.5 py-1 rounded-md text-xs font-bold ${
+                        contractCriteria === 'Đạt' ? 'bg-emerald-200 text-emerald-900' :
+                        contractCriteria === 'Chưa xác minh' ? 'bg-amber-200 text-amber-900' :
+                        'bg-red-200 text-red-900'
+                      }`}>
+                        {contractCriteria}
+                      </span>
+                    </div>
                   </div>
-                  <span className={`px-2.5 py-1 rounded-md text-xs font-bold ${
-                    contractCriteria === 'Đạt' ? 'bg-emerald-100 text-emerald-800' :
-                    contractCriteria === 'Chưa xác minh' ? 'bg-amber-100 text-amber-800' :
-                    'bg-red-100 text-red-800'
-                  }`}>
-                    {contractCriteria}
-                  </span>
                 </div>
 
-                {/* Tiêu chí 2: Tiền cọc một tháng */}
-                <div className="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-1.5 font-semibold text-slate-900">
-                      <span>2. Cọc một tháng thu đủ đúng hợp đồng (UC-PH-07)</span>
+                {/* Tiêu chí 2: Cọc một tháng thu đủ đúng hợp đồng (UC-PH-07) */}
+                <div className={`p-3 rounded-xl border transition-all ${
+                  depositCriteria === 'Đạt' ? 'bg-emerald-50/70 border-emerald-300' :
+                  depositCriteria === 'Chưa xác minh' ? 'bg-amber-50/70 border-amber-300' :
+                  'bg-red-50/70 border-red-300'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                        <span>2. Cọc một tháng thu đủ đúng hợp đồng (UC-PH-07 / A1.13)</span>
+                      </div>
+                      <span className="text-[11px] text-slate-600 block mt-0.5">
+                        Số tiền cọc: <strong className="font-mono text-indigo-900">{targetContract?.depositAmount.toLocaleString('vi-VN') || '3.500.000'} đ</strong> · Ghi nhận độc lập theo mã cọc gốc {targetContract?.initialDepositCode || 'COC-' + selectedRoom.roomCode + '-L1'}
+                      </span>
+                      {depositCriteria !== 'Đạt' && (
+                        <span className="text-[10px] text-red-700 font-semibold block mt-0.5">
+                          Lý do: Chưa xác nhận thực nhận tiền cọc vào tài khoản ngân hàng tại UC-PH-07 (BR-UC.PH.05-04).
+                        </span>
+                      )}
                     </div>
-                    <span className="text-[11px] text-slate-500 block">
-                      Số tiền: {targetContract?.depositAmount.toLocaleString('vi-VN') || '3.500.000'} đ · Đã đối soát ngân hàng
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => { setShowCheckInModal(false); setShowPayment07Modal(true); }}
+                        className="px-2 py-1 bg-white hover:bg-slate-100 text-indigo-700 rounded border border-indigo-200 text-xs font-semibold cursor-pointer"
+                      >
+                        Tra soát UC-PH-07
+                      </button>
+                      <span className={`px-2.5 py-1 rounded-md text-xs font-bold ${
+                        depositCriteria === 'Đạt' ? 'bg-emerald-200 text-emerald-900' :
+                        depositCriteria === 'Chưa xác minh' ? 'bg-amber-200 text-amber-900' :
+                        'bg-red-200 text-red-900'
+                      }`}>
+                        {depositCriteria}
+                      </span>
+                    </div>
                   </div>
-                  <span className={`px-2.5 py-1 rounded-md text-xs font-bold ${
-                    depositCriteria === 'Đạt' ? 'bg-emerald-100 text-emerald-800' :
-                    depositCriteria === 'Chưa xác minh' ? 'bg-amber-100 text-amber-800' :
-                    'bg-red-100 text-red-800'
-                  }`}>
-                    {depositCriteria}
-                  </span>
                 </div>
 
-                {/* Tiêu chí 3: Tiền thuê kỳ đầu một tháng */}
-                <div className="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-1.5 font-semibold text-slate-900">
-                      <span>3. Tiền thuê kỳ đầu một tháng đã trả trước đúng kỳ (UC-PH-07)</span>
+                {/* Tiêu chí 3: Tiền thuê kỳ đầu một tháng đã trả trước đúng kỳ (UC-PH-07) */}
+                <div className={`p-3 rounded-xl border transition-all ${
+                  rentCriteria === 'Đạt' ? 'bg-emerald-50/70 border-emerald-300' :
+                  rentCriteria === 'Chưa xác minh' ? 'bg-amber-50/70 border-amber-300' :
+                  'bg-red-50/70 border-red-300'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                        <span>3. Tiền thuê kỳ đầu một tháng đã trả trước đúng kỳ (UC-PH-07)</span>
+                      </div>
+                      <span className="text-[11px] text-slate-600 block mt-0.5">
+                        Số tiền thuê đầu: <strong className="font-mono text-blue-900">{targetContract?.monthlyRent.toLocaleString('vi-VN') || '3.500.000'} đ</strong> · Kỳ thuê: {selectedRoom.firstMonthPeriod || 'Kỳ đầu'}
+                      </span>
+                      {rentCriteria !== 'Đạt' && (
+                        <span className="text-[10px] text-red-700 font-semibold block mt-0.5">
+                          Lý do: Tiền thuê kỳ đầu chưa được đối soát thanh toán chuyển khoản đủ tại UC-PH-07.
+                        </span>
+                      )}
                     </div>
-                    <span className="text-[11px] text-slate-500 block">
-                      Số tiền: {targetContract?.monthlyRent.toLocaleString('vi-VN') || '3.500.000'} đ · Kỳ thuê: {selectedRoom.firstMonthPeriod || 'Kỳ đầu'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => { setShowCheckInModal(false); setShowPayment07Modal(true); }}
+                        className="px-2 py-1 bg-white hover:bg-slate-100 text-blue-700 rounded border border-blue-200 text-xs font-semibold cursor-pointer"
+                      >
+                        Tra soát UC-PH-07
+                      </button>
+                      <span className={`px-2.5 py-1 rounded-md text-xs font-bold ${
+                        rentCriteria === 'Đạt' ? 'bg-emerald-200 text-emerald-900' :
+                        rentCriteria === 'Chưa xác minh' ? 'bg-amber-200 text-amber-900' :
+                        'bg-red-200 text-red-900'
+                      }`}>
+                        {rentCriteria}
+                      </span>
+                    </div>
                   </div>
-                  <span className={`px-2.5 py-1 rounded-md text-xs font-bold ${
-                    rentCriteria === 'Đạt' ? 'bg-emerald-100 text-emerald-800' :
-                    rentCriteria === 'Chưa xác minh' ? 'bg-amber-100 text-amber-800' :
-                    'bg-red-100 text-red-800'
-                  }`}>
-                    {rentCriteria}
-                  </span>
                 </div>
 
-                {/* Tiêu chí 4: Bàn giao nhận thực tế */}
-                <div className="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-1.5 font-semibold text-slate-900">
-                      <span>4. Bàn giao nhận thực tế hoàn tất &amp; UC-BG03 Đã xác nhận</span>
+                {/* Tiêu chí 4: Bàn giao nhận thực tế hoàn tất & UC-BG03 Đã xác nhận */}
+                <div className={`p-3 rounded-xl border transition-all ${
+                  handoverCriteria === 'Đạt' ? 'bg-emerald-50/70 border-emerald-300' :
+                  handoverCriteria === 'Chưa xác minh' ? 'bg-amber-50/70 border-amber-300' :
+                  'bg-red-50/70 border-red-300'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                        <span>4. Bàn giao nhận thực tế hoàn tất &amp; UC-BG03 Đã xác nhận</span>
+                      </div>
+                      <span className="text-[11px] text-slate-600 block mt-0.5">
+                        Biên bản {report?.reportNumber || 'BB-BG03'} ({report?.status || 'Bản nháp'}) · Khách ký: <strong>{report?.tenantSignedPaper || (checkInHandoverSigned ? 'Đã ký giấy' : 'Chưa ký')}</strong> · Chủ nhà ký: <strong>{report?.ownerSignedPaper || (checkInHandoverSigned ? 'Đã ký giấy' : 'Chưa ký')}</strong>
+                      </span>
+                      {handoverCriteria !== 'Đạt' && (
+                        <span className="text-[10px] text-red-700 font-semibold block mt-0.5">
+                          Lý do: Hai bên chưa ký tay đầy đủ vào biên bản giấy hoặc chưa xác nhận UC-BG03.
+                        </span>
+                      )}
                     </div>
-                    <span className="text-[11px] text-slate-500 block">
-                      Biên bản {report?.reportNumber || 'BB-BG03'} · Hai bên đã ký tay đầy đủ
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => { setShowCheckInModal(false); setShowHandoverModal(true); }}
+                        className="px-2 py-1 bg-white hover:bg-slate-100 text-emerald-700 rounded border border-emerald-200 text-xs font-semibold cursor-pointer"
+                      >
+                        Ký giấy UC-BG03
+                      </button>
+                      <span className={`px-2.5 py-1 rounded-md text-xs font-bold ${
+                        handoverCriteria === 'Đạt' ? 'bg-emerald-200 text-emerald-900' :
+                        handoverCriteria === 'Chưa xác minh' ? 'bg-amber-200 text-amber-900' :
+                        'bg-red-200 text-red-900'
+                      }`}>
+                        {handoverCriteria}
+                      </span>
+                    </div>
                   </div>
-                  <span className={`px-2.5 py-1 rounded-md text-xs font-bold ${
-                    handoverCriteria === 'Đạt' ? 'bg-emerald-100 text-emerald-800' :
-                    handoverCriteria === 'Chưa xác minh' ? 'bg-amber-100 text-amber-800' :
-                    'bg-red-100 text-red-800'
-                  }`}>
-                    {handoverCriteria}
-                  </span>
                 </div>
               </div>
 
               {/* Điều hướng thông minh theo Giao diện mục 4 */}
               {!allFourPassed && (
-                <div className="p-3 rounded-xl border space-y-2 text-xs">
+                <div className="p-3.5 rounded-xl border space-y-2 text-xs">
                   {twoPaymentsPassed ? (
-                    <div className="bg-orange-50/80 p-2.5 rounded-lg border border-orange-200 text-orange-950 flex items-center justify-between">
+                    <div className="bg-orange-50/90 p-3 rounded-lg border border-orange-200 text-orange-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div>
-                        <strong>Thiếu hiệu lực hợp đồng hoặc bàn giao:</strong>
-                        <span className="block text-[11px] text-orange-900">
-                          Hai khoản cọc 1 tháng và tiền thuê đầu 1 tháng đã Đạt. Bạn có thể mở UC-PH-06 để theo dõi phần điều kiện còn thiếu.
+                        <strong className="text-orange-950 font-bold block">Thiếu hiệu lực hợp đồng hoặc bàn giao (BR-UC.PH.05 / UC-PH-06):</strong>
+                        <span className="block text-[11px] text-orange-900 mt-0.5">
+                          Hai khoản cọc 1 tháng và tiền thuê đầu 1 tháng đã ĐẠT và liên kết đúng. Bạn có thể mở <strong>UC-PH-06</strong> để theo dõi phần điều kiện còn thiếu.
                         </span>
                       </div>
                       <button
@@ -3682,17 +3876,17 @@ export const RoomsView: React.FC = () => {
                           setShowCheckInModal(false);
                           setShowMissingConditionModal(true);
                         }}
-                        className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded font-semibold text-xs cursor-pointer shrink-0"
+                        className="px-3.5 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-bold text-xs cursor-pointer shrink-0 shadow-xs"
                       >
-                        Mở UC-PH-06
+                        Mở UC-PH-06 Ghi nhận còn thiếu →
                       </button>
                     </div>
                   ) : (
-                    <div className="bg-red-50 p-2.5 rounded-lg border border-red-200 text-red-950 flex items-center justify-between">
+                    <div className="bg-red-50 p-3 rounded-lg border border-red-200 text-red-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div>
-                        <strong>Chứng cứ thanh toán chưa Đạt / Chưa xác minh:</strong>
-                        <span className="block text-[11px] text-red-900">
-                          Khóa chức năng nhận phòng và khóa UC-PH-06 (BR-UC.PH.06-02). Yêu cầu tra soát và hoàn tất tại UC-PH-07 trước.
+                        <strong className="text-red-950 font-bold block">Chứng cứ thanh toán chưa Đạt / Chưa xác minh:</strong>
+                        <span className="block text-[11px] text-red-900 mt-0.5">
+                          Khóa chức năng nhận phòng và <strong>khóa UC-PH-06</strong> (BR-UC.PH.06-02). Bắt buộc tra soát tại <strong>UC-PH-07</strong>. Tuyệt đối không cho nhận phòng trước rồi nộp bổ sung!
                         </span>
                       </div>
                       <button
@@ -3700,30 +3894,52 @@ export const RoomsView: React.FC = () => {
                           setShowCheckInModal(false);
                           setShowPayment07Modal(true);
                         }}
-                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded font-semibold text-xs cursor-pointer shrink-0"
+                        className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs cursor-pointer shrink-0 shadow-xs"
                       >
-                        Tra soát UC-PH-07
+                        Tra soát UC-PH-07 ngay →
                       </button>
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Form chọn ngày nhận thực tế */}
-              {allFourPassed && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2 text-emerald-950">
+              {/* Form chọn ngày nhận thực tế khi cả 4 tiêu chí Đạt (Bước 5) */}
+              {allFourPassed && selectedRoom.status !== 'Đang thuê' && (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-xl space-y-2 text-emerald-950">
                   <div className="flex items-center gap-1.5 font-bold text-emerald-900">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span>Cả 4 tiêu chí đã ĐẠT đồng thời! Sẵn sàng xác nhận nhận phòng.</span>
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                    <span>Cả 4 tiêu chí đã ĐẠT đồng thời! Sẵn sàng xác nhận nhận phòng hoàn tất (Bước 5).</span>
                   </div>
-                  <div className="flex items-center gap-2 pt-1">
+                  <p className="text-[11px] text-emerald-800">
+                    Hệ thống sẽ lưu ngày nhận phòng thực tế, chuyển phòng sang <strong>Đang thuê</strong>, cập nhật thời gian kỳ thuê đầu đã trả trước, và phát sự kiện <strong>Bắt đầu lần thuê</strong> sang <strong>HSKT-02</strong> để kiểm tra lại người ở cùng Dự kiến (không tự chuyển sang Đang cư trú).
+                  </p>
+                  <div className="flex items-center gap-2 pt-1 border-t border-emerald-200">
                     <span className="font-semibold text-xs">Ngày nhận phòng thực tế:</span>
                     <input
                       type="date"
                       value={checkInDate}
                       onChange={(e) => setCheckInDate(e.target.value)}
-                      className="px-2.5 py-1 border border-emerald-300 rounded bg-white font-mono text-xs"
+                      className="px-2.5 py-1.5 border border-emerald-300 rounded-lg bg-white font-mono text-xs font-bold text-emerald-900"
                     />
+                  </div>
+                </div>
+              )}
+
+              {/* Kết quả thành công (Giao diện mục 5) nếu phòng đã Đang thuê */}
+              {selectedRoom.status === 'Đang thuê' && (
+                <div className="p-3.5 bg-blue-50 border border-blue-300 rounded-xl space-y-2 text-blue-950">
+                  <div className="flex items-center gap-2 font-bold text-blue-900">
+                    <CheckCircle2 className="w-5 h-5 text-blue-600" />
+                    <span>Kết quả nhận phòng thành công đã ghi nhận tại UC-PH-04:</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-blue-200">
+                    <div>Trạng thái phòng: <strong className="text-blue-900">Đang thuê (UC-PH-04)</strong></div>
+                    <div>Ngày nhận thực tế: <strong className="font-mono text-slate-900">{selectedRoom.contractStartDate || checkInDate}</strong></div>
+                    <div>Mã sự kiện: <strong className="font-mono text-purple-900">{leaseStartEvents.find(e => e.roomCode === selectedRoom.roomCode)?.eventId || 'EVT-LS-' + selectedRoom.roomCode}</strong></div>
+                    <div>Đồng bộ HSKT-02: <strong className="text-emerald-800">Đã phát sự kiện Bắt đầu lần thuê</strong></div>
+                    <div className="col-span-2 text-slate-600">
+                      * Kỳ thuê đầu: <strong>{selectedRoom.firstMonthPeriod || 'Đã trả trước tại UC-PH-07'}</strong> (Không thu lại tiền thuê đầu).
+                    </div>
                   </div>
                 </div>
               )}
@@ -3758,33 +3974,35 @@ export const RoomsView: React.FC = () => {
                   >
                     Quay lại
                   </button>
-                  <button
-                    disabled={!allFourPassed}
-                    onClick={() => {
-                      if (!allFourPassed) return;
-                      const res = confirmCheckInPH05(
-                        selectedRoom.roomCode,
-                        selectedRoom.currentLeaseId || 'THUE-' + selectedRoom.roomCode,
-                        checkInDate,
-                        report?.id,
-                        'v1.0'
-                      );
-                      if (res.success) {
-                        setShowCheckInModal(false);
-                        setSelectedRoom(rooms.find(r => r.roomCode === selectedRoom.roomCode) || null);
-                        showToast('success', res.message);
-                      } else {
-                        showToast('error', res.message);
-                      }
-                    }}
-                    className={`px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer shadow-xs ${
-                      allFourPassed
-                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                    }`}
-                  >
-                    Xác nhận nhận phòng hoàn tất (Bước 5)
-                  </button>
+                  {selectedRoom.status !== 'Đang thuê' && (
+                    <button
+                      disabled={!allFourPassed}
+                      onClick={() => {
+                        if (!allFourPassed) return;
+                        const res = confirmCheckInPH05(
+                          selectedRoom.roomCode,
+                          selectedRoom.currentLeaseId || 'THUE-' + selectedRoom.roomCode,
+                          checkInDate,
+                          report?.id,
+                          'v1.0'
+                        );
+                        if (res.success) {
+                          setShowCheckInModal(false);
+                          setSelectedRoom(rooms.find(r => r.roomCode === selectedRoom.roomCode) || null);
+                          showToast('success', res.message);
+                        } else {
+                          showToast('error', res.message);
+                        }
+                      }}
+                      className={`px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer shadow-xs ${
+                        allFourPassed
+                          ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                          : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                      }`}
+                    >
+                      Xác nhận nhận phòng hoàn tất (Bước 5)
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -4042,47 +4260,98 @@ export const RoomsView: React.FC = () => {
                 </button>
               </div>
 
-              {/* Thông tin tra cứu (Giao diện mục 1) */}
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 text-[11px] text-slate-700">
-                <div className="flex justify-between">
-                  <span>Hợp đồng &amp; lần thuê hiện hành:</span>
-                  <strong className="font-mono text-slate-900">{selectedRoom.currentContractId || '—'} ({selectedRoom.currentLeaseId || 'THUE-' + selectedRoom.roomCode})</strong>
+              {/* Thông tin tra cứu (Giao diện mục 1: chỉ xem, không sửa từ ASIS-02) */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-[11px] text-slate-700">
+                <div className="flex justify-between items-center border-b border-slate-200 pb-1.5">
+                  <span className="font-semibold">Hợp đồng &amp; lần thuê hiện hành:</span>
+                  <strong className="font-mono text-slate-900 text-xs">
+                    {selectedRoom.currentContractId || '—'} ({selectedRoom.currentLeaseId || 'THUE-' + selectedRoom.roomCode})
+                  </strong>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between items-center">
                   <span>Biên bản trả phòng ASIS-02:</span>
-                  <strong className="font-mono text-slate-900">{inspection?.id || 'BB-BG09-01'}</strong>
+                  <div className="flex items-center gap-1.5">
+                    <strong className="font-mono text-slate-900">{inspection?.id || 'BB-BG09-01'}</strong>
+                    <button
+                      type="button"
+                      onClick={() => { setShowReturnModal(false); setShowHandoverModal(true); }}
+                      className="text-blue-600 hover:text-blue-800 underline text-[10px] cursor-pointer"
+                    >
+                      (Xem hồ sơ bàn giao)
+                    </button>
+                  </div>
                 </div>
-                <div className="flex justify-between pt-1 border-t border-slate-200">
-                  <span>Kết quả ghi ở bước 3.04:</span>
-                  <span className={`font-bold ${step304Val === 'Đã nhận lại' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                <div className="flex justify-between items-center pt-1 border-t border-slate-200">
+                  <span className="font-semibold">Kết quả nhận lại thực tế tại bước 3.04:</span>
+                  <span className={`px-2.5 py-0.5 rounded text-[11px] font-bold ${
+                    step304Val === 'Đã nhận lại' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                  }`}>
                     {step304Val}
                   </span>
                 </div>
-                <div className="flex justify-between">
-                  <span>Xác nhận độc lập của Chủ nhà tại 3.05:</span>
-                  <span className={`font-bold ${step305Val ? 'text-emerald-700' : 'text-red-700'}`}>
-                    {step305Val ? 'Đã xác nhận (Người thực hiện: Chủ nhà, Có bằng chứng)' : 'Chưa có xác nhận hợp lệ'}
+                <div className="flex justify-between items-center">
+                  <span className="font-semibold">Xác nhận độc lập của Chủ nhà tại bước 3.05:</span>
+                  <span className={`px-2.5 py-0.5 rounded text-[11px] font-bold ${
+                    step305Val ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+                  }`}>
+                    {step305Val ? 'Đã xác nhận độc lập (Chủ nhà ký & có bằng chứng)' : 'Chưa có xác nhận hợp lệ'}
                   </span>
                 </div>
+                {step305Val && inspection && (
+                  <div className="p-2 bg-emerald-50 rounded-lg text-[10px] text-emerald-900 border border-emerald-200 space-y-0.5">
+                    <div>Người xác nhận: <strong>{inspection.step305ConfirmedBy || 'Chủ nhà'}</strong> · Thời điểm: <strong>{inspection.step305ConfirmedAt?.substring(0, 16).replace('T', ' ') || 'Đã xác nhận'}</strong></div>
+                    <div>Bằng chứng nghiệm thu: <em>{inspection.step305Evidence || 'Ảnh chụp hoàn trả chìa khóa & phòng sạch sẽ'}</em></div>
+                  </div>
+                )}
               </div>
 
-              {/* Tình huống 3.04 = Chưa nhận lại */}
+              {/* Nút Bước 1: Kiểm tra kết quả bàn giao (luôn khả dụng theo Giao diện mục 2) */}
+              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl flex items-center justify-between">
+                <div>
+                  <strong className="text-xs text-blue-950 block">Bước 1: Tra cứu kết quả từ quy trình ASIS-02</strong>
+                  <span className="text-[11px] text-blue-800">
+                    Hệ thống truy xuất dữ liệu độc lập tại bước 3.04 và xác nhận 3.05 của Chủ nhà.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReturnChecked(true);
+                    showToast('success', `Đã tra cứu hồ sơ ASIS-02: 3.04 = ${step304Val}, 3.05 = ${step305Val ? 'Đã xác nhận' : 'Chưa xác nhận'}.`);
+                  }}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-xs cursor-pointer shadow-xs flex items-center gap-1 shrink-0"
+                >
+                  <FileCheck2 className="w-3.5 h-3.5" />
+                  Kiểm tra kết quả bàn giao (Bước 1)
+                </button>
+              </div>
+
+              {/* Tình huống 1: 3.04 = Chưa nhận lại */}
               {step304Val === 'Chưa nhận lại' && (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2 text-amber-950">
+                <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl space-y-2 text-amber-950">
                   <div className="flex items-center gap-1.5 font-bold">
                     <AlertCircle className="w-4 h-4 text-amber-700" />
-                    <span>Nhánh chưa bàn giao xong: Phòng tiếp tục duy trì trạng thái Đang thuê</span>
+                    <span>Nhánh chưa nhận lại: Phòng tiếp tục duy trì trạng thái Đang thuê (BR-UC.PH.08-01)</span>
                   </div>
                   <p className="text-[11px] leading-relaxed">
-                    Theo <strong>BR-UC.PH.08-01</strong>: Chỉ kết quả Đã nhận lại thực tế và có xác nhận 3.05 mới cho phép ghi Trống. Nếu khách không/chưa thể tiếp tục hoàn tất bàn giao, bạn có thể mở <strong>UC-PH-09</strong> để ghi nhận lý do vướng mắc.
+                    Chủ nhà chưa nhận lại phòng thực tế. Nếu khách còn tiếp tục bàn giao, giữ nguyên trạng thái. Nếu khách không thể tiếp tục, bạn có thể mở <strong>UC-PH-09</strong> để ghi nhận lý do vướng mắc (không cảnh báo thiếu 3.05).
                   </p>
-                  <div className="flex justify-end gap-2 pt-1">
+                  <div className="flex justify-end gap-2 pt-1 border-t border-amber-200">
+                    <button
+                      onClick={() => {
+                        setShowReturnModal(false);
+                        setShowHandoverModal(true);
+                      }}
+                      className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded font-semibold text-xs cursor-pointer"
+                    >
+                      Xem hồ sơ bàn giao
+                    </button>
                     <button
                       onClick={() => {
                         setShowReturnModal(false);
                         setShowUnfinishedHandoverModal(true);
                       }}
-                      className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded font-semibold text-xs cursor-pointer"
+                      className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded font-semibold text-xs cursor-pointer shadow-xs"
                     >
                       Mở UC-PH-09 Ghi nhận chưa bàn giao xong
                     </button>
@@ -4090,34 +4359,64 @@ export const RoomsView: React.FC = () => {
                 </div>
               )}
 
-              {/* Tình huống 3.04 = Đã nhận lại nhưng thiếu 3.05 */}
+              {/* Tình huống 2: 3.04 = Đã nhận lại nhưng thiếu 3.05 */}
               {step304Val === 'Đã nhận lại' && !step305Val && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-xl space-y-1.5 text-red-950">
-                  <strong className="block font-bold">Chờ Chủ nhà xác nhận độc lập tại ASIS-02 (EF-01):</strong>
-                  <p className="text-[11px]">
-                    Kết quả 3.04 = Đã nhận lại nhưng chưa có xác nhận độc lập của Chủ nhà tại bước 3.05. Không được cập nhật Trống từ bản nháp.
+                <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl space-y-2 text-red-950">
+                  <div className="flex items-center gap-1.5 font-bold text-red-900">
+                    <AlertCircle className="w-4 h-4 text-red-600" />
+                    <span>Chờ Chủ nhà xác nhận độc lập tại ASIS-02 (EF-01 / BR-UC.PH.08-01)</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-red-900">
+                    Kết quả 3.04 = Đã nhận lại nhưng chưa có xác nhận độc lập tại bước 3.05 của Chủ nhà (thiếu người thực hiện, thời điểm và bằng chứng). <strong>Tuyệt đối không được cập nhật Trống từ bản nháp</strong> và không phát sinh nút xác nhận lần hai tại đây.
                   </p>
+                  <div className="flex justify-end pt-1">
+                    <button
+                      onClick={() => {
+                        setShowReturnModal(false);
+                        setShowHandoverModal(true);
+                      }}
+                      className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded font-semibold text-xs cursor-pointer"
+                    >
+                      Mở hồ sơ ASIS-02 để Chủ nhà xác nhận 3.05 →
+                    </button>
+                  </div>
                 </div>
               )}
 
-              {/* Tình huống Đủ điều kiện cập nhật Trống */}
-              {canVacate && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2 text-emerald-950">
-                  <div className="flex items-center gap-1.5 font-bold">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-700" />
-                    <span>Đủ điều kiện ghi Trống (3.04 = Đã nhận lại &amp; 3.05 = Đã xác nhận)</span>
+              {/* Tình huống 3: Đủ điều kiện cập nhật Trống (3.04 = Đã nhận lại & 3.05 = Đã xác nhận) */}
+              {canVacate && selectedRoom.status !== 'Trống' && (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-xl space-y-2 text-emerald-950">
+                  <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                    <span>Đủ điều kiện ghi Trống (Bước 2): 3.04 = Đã nhận lại &amp; 3.05 = Đã xác nhận độc lập</span>
                   </div>
-                  <p className="text-[11px] leading-relaxed">
-                    Theo <strong>BR-UC.PH.08-02 &amp; BR-UC.PH.08-03</strong>: Phòng được cập nhật Trống ngay, không cần chờ quyết toán cọc. Hệ thống sẽ tự lưu liên kết hợp đồng, khách thuê và biên bản vào lịch sử lần thuê cho HSKT-05 tra cứu.
+                  <p className="text-[11px] leading-relaxed text-emerald-800">
+                    Theo <strong>BR-UC.PH.08-02 &amp; BR-UC.PH.08-03</strong>: Phòng được cập nhật Trống ngay, <strong>không cần chờ quyết toán tiền cọc</strong> (tiền cọc tiếp tục theo dõi tại QT05). Hệ thống tự động liên kết hợp đồng, khách thuê, người ở cùng và biên bản vào lịch sử lần thuê cho <strong>HSKT-05</strong> tra cứu.
                   </p>
-                  <div className="flex items-center gap-2 pt-1">
+                  <div className="flex items-center gap-2 pt-1 border-t border-emerald-200">
                     <span className="font-semibold text-xs">Ngày nhận lại thực tế (kết thúc lần thuê):</span>
                     <input
                       type="date"
                       value={returnActualDate}
                       onChange={(e) => setReturnActualDate(e.target.value)}
-                      className="px-2.5 py-1 border border-emerald-300 rounded bg-white font-mono text-xs"
+                      className="px-2.5 py-1.5 border border-emerald-300 rounded-lg bg-white font-mono text-xs font-bold text-emerald-900"
                     />
+                  </div>
+                </div>
+              )}
+
+              {/* Tình huống 4: Phòng đã Trống thành công (Giao diện mục 5) */}
+              {selectedRoom.status === 'Trống' && (
+                <div className="p-3.5 bg-slate-100 border border-slate-300 rounded-xl space-y-2 text-slate-800">
+                  <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>Phòng hiện đang ở trạng thái Trống (Đã hoàn tất nhận lại thực tế):</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-slate-200">
+                    <div>Ngày kết thúc thuê thực tế: <strong className="font-mono text-slate-900">{returnActualDate}</strong></div>
+                    <div>Đồng bộ cư trú HSKT-05: <strong className="text-emerald-700">Đã đồng bộ kết thúc cư trú</strong></div>
+                    <div>Căn cứ ASIS-02: <strong className="font-mono">3.04 = Đã nhận lại (Xác nhận 3.05 v1.0)</strong></div>
+                    <div>Quyết toán cọc (QT05): <span className="text-slate-500 italic">Theo dõi độc lập tại QT05</span></div>
                   </div>
                 </div>
               )}
@@ -4138,7 +4437,7 @@ export const RoomsView: React.FC = () => {
                       onChange={(e) => setReturnSimulateEF01(e.target.checked)}
                       className="rounded border-slate-300"
                     />
-                    <span>Mô phỏng chưa nhận lại</span>
+                    <span>Mô phỏng chưa nhận lại (EF-01)</span>
                   </label>
                 </div>
 
@@ -4150,32 +4449,34 @@ export const RoomsView: React.FC = () => {
                   >
                     Đóng
                   </button>
-                  <button
-                    type="button"
-                    disabled={!canVacate}
-                    onClick={() => {
-                      if (!canVacate) return;
-                      const res = confirmReturnStep305AndVacantPH08(
-                        selectedRoom.roomCode,
-                        selectedRoom.currentLeaseId || 'THUE-' + selectedRoom.roomCode,
-                        returnActualDate
-                      );
-                      if (res.success) {
-                        setShowReturnModal(false);
-                        setSelectedRoom(rooms.find(r => r.roomCode === selectedRoom.roomCode) || null);
-                        showToast('success', res.message);
-                      } else {
-                        showToast('error', res.message);
-                      }
-                    }}
-                    className={`px-4 py-2 rounded-lg font-semibold text-xs cursor-pointer shadow-xs ${
-                      canVacate
-                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                    }`}
-                  >
-                    Cập nhật trạng thái Trống (UC-PH-08)
-                  </button>
+                  {selectedRoom.status !== 'Trống' && (
+                    <button
+                      type="button"
+                      disabled={!canVacate}
+                      onClick={() => {
+                        if (!canVacate) return;
+                        const res = confirmReturnStep305AndVacantPH08(
+                          selectedRoom.roomCode,
+                          selectedRoom.currentLeaseId || 'THUE-' + selectedRoom.roomCode,
+                          returnActualDate
+                        );
+                        if (res.success) {
+                          setShowReturnModal(false);
+                          setSelectedRoom(rooms.find(r => r.roomCode === selectedRoom.roomCode) || null);
+                          showToast('success', res.message);
+                        } else {
+                          showToast('error', res.message);
+                        }
+                      }}
+                      className={`px-4 py-2 rounded-lg font-semibold text-xs cursor-pointer shadow-xs ${
+                        canVacate
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                      }`}
+                    >
+                      Cập nhật trạng thái Trống (Bước 2 / UC-PH-08)
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -4230,37 +4531,83 @@ export const RoomsView: React.FC = () => {
                 </p>
               </div>
 
-              {/* Form nhập Lý do & Nội dung vướng mắc (EF-02 bắt buộc) */}
-              <div className="space-y-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Lý do khách chưa thể tiếp tục bàn giao <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={unfinishedReason}
-                    onChange={(e) => setUnfinishedReason(e.target.value)}
-                    placeholder="Ví dụ: Khách còn đồ đạc cá nhân chưa dọn hết..."
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
-                  />
+              {/* Form nhập hoặc Xem nội dung vướng mắc (Giao diện mục 1 & 2) */}
+              {existingRecord && !unfinishedEditMode ? (
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                  <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                    <span className="font-bold text-slate-800 text-xs">Ghi nhận hiện hành của lần bàn giao đang xử lý:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUnfinishedReason(existingRecord.reason);
+                        setUnfinishedObstacle(existingRecord.obstacleContent);
+                        setUnfinishedEditMode(true);
+                      }}
+                      className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded font-bold text-xs cursor-pointer flex items-center gap-1"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      Cập nhật nội dung (AF-01)
+                    </button>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase font-semibold block">Lý do:</span>
+                    <p className="font-bold text-slate-900 text-xs mt-0.5">{existingRecord.reason}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase font-semibold block">Nội dung vướng mắc thực tế:</span>
+                    <p className="text-slate-700 text-xs mt-0.5 leading-relaxed">{existingRecord.obstacleContent}</p>
+                  </div>
+                  <div className="text-[10px] text-slate-500 pt-1.5 border-t border-slate-200 flex justify-between">
+                    <span>Người ghi: <strong>{existingRecord.loggedBy}</strong></span>
+                    <span>Thời điểm: <strong className="font-mono">{existingRecord.loggedAt.substring(0, 16).replace('T', ' ')}</strong></span>
+                  </div>
                 </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-800 text-xs">
+                      {existingRecord ? 'Cập nhật nội dung vướng mắc (AF-01 - Lưu lịch sử):' : 'Nhập thông tin chưa hoàn tất bàn giao (Bước 2):'}
+                    </span>
+                    {existingRecord && (
+                      <button
+                        type="button"
+                        onClick={() => setUnfinishedEditMode(false)}
+                        className="text-slate-500 hover:text-slate-700 text-xs underline cursor-pointer"
+                      >
+                        Hủy chế độ sửa
+                      </button>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Lý do khách chưa thể tiếp tục bàn giao <span className="text-red-500">* (Bắt buộc theo EF-02)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={unfinishedReason}
+                      onChange={(e) => setUnfinishedReason(e.target.value)}
+                      placeholder="Ví dụ: Khách còn đồ đạc cá nhân chưa dọn hết..."
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Nội dung vướng mắc thực tế <span className="text-red-500">*</span>
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={unfinishedObstacle}
-                    onChange={(e) => setUnfinishedObstacle(e.target.value)}
-                    placeholder="Mô tả cụ thể hiện trạng, thỏa thuận tạm hoãn..."
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
-                  />
-                  <span className="text-[10px] text-slate-400 block mt-0.5">
-                    * EF-02: Lý do và Nội dung vướng mắc là bắt buộc, không được để trống.
-                  </span>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Nội dung vướng mắc thực tế <span className="text-red-500">* (Bắt buộc theo EF-02)</span>
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={unfinishedObstacle}
+                      onChange={(e) => setUnfinishedObstacle(e.target.value)}
+                      placeholder="Mô tả cụ thể hiện trạng, thỏa thuận tạm hoãn..."
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                    />
+                    <span className="text-[10px] text-slate-400 block mt-0.5">
+                      * EF-02: Lý do và Nội dung vướng mắc là bắt buộc, không được để trống.
+                    </span>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Bảng Lịch sử ghi nhận (Giao diện mục 3) */}
               {existingRecord?.history && existingRecord.history.length > 0 && (
@@ -4307,38 +4654,44 @@ export const RoomsView: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setShowUnfinishedHandoverModal(false)}
+                    onClick={() => {
+                      setShowUnfinishedHandoverModal(false);
+                      setUnfinishedEditMode(false);
+                    }}
                     className="px-3.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg font-medium cursor-pointer"
                   >
-                    Hủy
+                    Đóng
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!unfinishedReason.trim() || !unfinishedObstacle.trim()) {
-                        showToast('error', 'EF-02: Lý do và nội dung vướng mắc không được để trống.');
-                        return;
-                      }
-                      const res = saveUnfinishedHandoverPH09({
-                        roomCode: selectedRoom.roomCode,
-                        leaseId: selectedRoom.currentLeaseId || 'THUE-' + selectedRoom.roomCode,
-                        contractId: selectedRoom.currentContractId || 'HD-' + selectedRoom.roomCode,
-                        handoverVersion: 'v1.0-RETURN',
-                        reason: unfinishedReason,
-                        obstacleContent: unfinishedObstacle,
-                        existingId: existingRecord?.id
-                      });
-                      if (res.success) {
-                        setShowUnfinishedHandoverModal(false);
-                        showToast('success', res.message);
-                      } else {
-                        showToast('error', res.message);
-                      }
-                    }}
-                    className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-semibold cursor-pointer shadow-xs"
-                  >
-                    {existingRecord ? 'Lưu cập nhật (AF-01)' : 'Lưu ghi nhận (Bước 3)'}
-                  </button>
+                  {(!existingRecord || unfinishedEditMode) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!unfinishedReason.trim() || !unfinishedObstacle.trim()) {
+                          showToast('error', 'EF-02: Lý do và nội dung vướng mắc không được để trống.');
+                          return;
+                        }
+                        const res = saveUnfinishedHandoverPH09({
+                          roomCode: selectedRoom.roomCode,
+                          leaseId: selectedRoom.currentLeaseId || 'THUE-' + selectedRoom.roomCode,
+                          contractId: selectedRoom.currentContractId || 'HD-' + selectedRoom.roomCode,
+                          handoverVersion: 'v1.0-RETURN',
+                          reason: unfinishedReason,
+                          obstacleContent: unfinishedObstacle,
+                          existingId: existingRecord?.id
+                        });
+                        if (res.success) {
+                          setShowUnfinishedHandoverModal(false);
+                          setUnfinishedEditMode(false);
+                          showToast('success', res.message);
+                        } else {
+                          showToast('error', res.message);
+                        }
+                      }}
+                      className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-semibold cursor-pointer shadow-xs"
+                    >
+                      {existingRecord ? 'Lưu cập nhật nội dung (AF-01)' : 'Lưu ghi nhận (Bước 3 / UC-PH-09)'}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
